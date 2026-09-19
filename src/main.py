@@ -11,16 +11,18 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import cv2
 from src.camera import Camera
+from src.geometry import calculate_saber_direction, calculate_saber_endpoint
 from src.hand_tracker import HandTracker, draw_hand_landmarks
 
 
 def main() -> None:
-    print("Starting Lightsabers — Hand Tracking Mode...")
+    print("Starting Lightsabers — Basic Saber Geometry Mode...")
     print("Press 'q' or ESC to exit.")
 
     window_name = "Jedi Lightsabers"
     prev_time = time.time()
     fps = 0.0
+    blade_length = 320.0
 
     try:
         with Camera(camera_index=0, width=1280, height=720, flip_horizontal=True) as camera, \
@@ -41,6 +43,20 @@ def main() -> None:
 
                 # Draw tracked hand landmarks
                 draw_hand_landmarks(frame, observations)
+
+                # Draw first saber line
+                if observations:
+                    obs = observations[0]
+                    direction = calculate_saber_direction(obs.wrist, obs.index_mcp, obs.index_tip)
+                    endpoint = calculate_saber_endpoint(obs.wrist, direction, blade_length)
+
+                    wrist_pt = (int(obs.wrist[0]), int(obs.wrist[1]))
+                    end_pt = (int(endpoint[0]), int(endpoint[1]))
+
+                    # Draw basic saber line (wrist -> endpoint)
+                    cv2.line(frame, wrist_pt, end_pt, (255, 120, 30), 6, cv2.LINE_AA)
+                    cv2.circle(frame, wrist_pt, 6, (0, 255, 255), -1, cv2.LINE_AA)
+                    cv2.circle(frame, end_pt, 4, (255, 255, 255), -1, cv2.LINE_AA)
 
                 # Overlay status
                 status_text = f"FPS: {fps:.1f} | Hands: {len(observations)}"
