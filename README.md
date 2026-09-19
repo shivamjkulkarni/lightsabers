@@ -61,13 +61,25 @@ A real-time computer-vision application that turns detected hands into glowing J
   - Press **`R`** to start a fresh rematch, or **`Q`** / **`ESC`** to quit.
 - **Rock-Solid Winning Saber & Recoil Elimination**:
   - Oscillation recoil flutter has been completely eliminated so the winning saber remains constant and stable.
-- **Pre-Duel Countdown**:
-  - 3-second animated on-screen countdown (`"DUEL IN: 3... 2... 1... ENGAGE!"`) initiates once both combatants have ignited their sabers.
-  - Disarms remain locked during countdown so fighters can spar without early knockouts.
-- **Parry Combat & Disarm Mechanics**:
-  - High-speed strikes evaluate defender leverage and blade angle.
-  - Blocking with the **forte** (lower 72% of the blade) at a crossing angle $\ge 30^\circ$ executes a successful **Parry** (`"PARRIED!"`).
-  - Strikers hitting the weak **foible** (tip) or slipping past poor angles trigger a **Missed Parry Disarm** (`"DISARMED! (MISSED PARRY: WEAK TIP)"`).
+- **Pre-Duel Countdown & State Continuity**:
+  - 3-second animated on-screen countdown (`"DUEL IN: 3... 2... 1... ENGAGE!"`) initiates once both combatants ignite their sabers.
+  - **Monotonic Continuity**: Once ignited, sabers remain ignited and the countdown proceeds monotonically without resetting if a hand temporarily drifts off-screen or swings rapidly.
+- **Spatial Hand Re-Acquisition**:
+  - Person 1 (Jedi Blue) occupies the left screen partition; Person 2 (Sith Red) occupies the right.
+  - Off-screen hands immediately re-bind to their respective lightsabers the moment they re-enter camera view without any arbitrary distance boundaries.
+- **Dynamic Guard Poise System**:
+  - Each combatant begins each round with **2 Guard Points** displayed in the HUD: `JEDI GUARD: [ + + ]   SITH GUARD: [ + + ]`.
+  - Imperfect blocks (parallel blade slips or weak tip contacts) deplete guard poise (`! GUARD SHAKEN! [1 POISE LEFT] !`) rather than causing instant 1-hit round finishes.
+  - A second broken block shatters guard poise completely, triggering a dramatic **DISARM**!
+- **Active Deflection ("Perfect Parry") & Counter-Strike Advantage**:
+  - Actively snapping your blade into an incoming strike at $\ge 35^\circ$ with the forte executes a **Perfect Parry**!
+  - Emits a radiant 50-spark supernova burst and an expanding radial plasma shockwave ring.
+  - Restores +1 Guard Poise and grants a **1.2-second Counter-Strike Window** (+35% blade speed priority).
+- **Radial Plasma Shockwaves**:
+  - High-energy clashes and parries generate expanding circular plasma wavefront rings rendered directly through additive Gaussian bloom.
+- **Saber Locks & Rally Combos**:
+  - Sustained blade contact (> 0.22s) triggers a **Saber Lock** with crackling electrical sparks and a push-off prompt.
+  - Rapid back-and-forth clashes build **Rally Streaks** displayed on-screen (`>> RALLY x3! <<`, `*** RALLY x5! EPIC CLASH! ***`).
 - **Floor-Bouncing Disarm Physics**:
   - When disarmed, the saber tumbles along a parabolic arc under gravity ($950\text{px/s}^2$), bounces off the floor with restitution and friction, emits ground sparks, and retracts into the hilt before re-arming.
 - **Calibrated 3D Perspective Scaling**:

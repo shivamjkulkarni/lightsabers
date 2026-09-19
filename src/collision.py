@@ -140,8 +140,11 @@ class DuelClashResult:
     is_clash: bool
     is_mutual: bool = False
     is_parry: bool = False
-    disarmed_slot: Optional[str] = None  # "Person1" or "Person2" if missed parry
-    banner_text: Optional[str] = None     # On-screen HUD feedback
+    is_perfect_parry: bool = False
+    poise_damaged_slot: Optional[str] = None  # "Person1" or "Person2" if guard shaken
+    disarmed_slot: Optional[str] = None       # "Person1" or "Person2" if missed parry on 0 poise
+    shockwave_type: str = "normal"            # "normal", "perfect", "heavy"
+    banner_text: Optional[str] = None         # On-screen HUD feedback
     banner_color: Tuple[int, int, int] = (0, 255, 128)  # BGR color
     reason: str = ""
 
@@ -154,6 +157,8 @@ def evaluate_duel_clash(
     s2_speed: float,
     is_new_clash: bool,
     is_duel_active: bool,
+    s1_poise: int = 1,
+    s2_poise: int = 1,
     strike_min_speed: float = 340.0,
     strike_speed_ratio: float = 1.7,
     parry_min_angle_deg: float = 30.0,
@@ -162,20 +167,24 @@ def evaluate_duel_clash(
     mutual_clash_ratio: float = 1.6,
 ) -> DuelClashResult:
     """
-    Evaluate duel combat mechanics: mutual clashes, parries, and missed-parry disarms.
+    Evaluate duel combat mechanics: mutual clashes, perfect parries, solid blocks,
+    guard poise staggers, and decisive disarms.
     
     1. Debouncing: Disarm/parry evaluation occurs only on the initial contact frame of a clash.
-    2. Countdown Gate: If the duel countdown is still active, disarms are suppressed.
-    3. Mutual Clash: If both fighters swing with high momentum, neither is disarmed.
-    4. Parry Check: If an attacker executes a fast strike, defender must block with the forte
-       (lower blade, t <= 0.72) and a solid crossing angle (>= 30 deg).
-    5. Missed Parry: Hit on the weak tip (t > 0.72) or poor angle (< 30 deg) causes disarm!
+    2. Countdown Gate: If the duel countdown is still active, disarms/poise damage are suppressed.
+    3. Mutual Clash: If both fighters swing aggressively, neither loses poise or saber.
+    4. Perfect Parry: Moving blade actively into strike (speed >= 110, angle >= 35 deg, forte contact)
+       triggers a perfect deflection with supernova burst and counter-strike advantage.
+    5. Solid Block: Blocking with forte (ratio <= 0.72) and solid angle (>= 30 deg) parries cleanly.
+    6. Guard Poise Damage: Hit on weak tip (> 0.72) or parallel slip (< 30 deg) with poise > 1
+       damages guard poise without ending the round ("GUARD SHAKEN!").
+    7. Missed Parry Disarm: Hit on weak tip or parallel slip with poise <= 1 breaks guard and DISARMS!
     """
     if not is_new_clash:
-        return DuelClashResult(is_clash=True, reason="ongoing_clash")
+        return DuelClashResult(is_clash=True, shockwave_type="normal", reason="ongoing_clash")
 
     if not is_duel_active:
-        return DuelClashResult(is_clash=True, reason="countdown_active")
+        return DuelClashResult(is_clash=True, shockwave_type="normal", reason="countdown_active")
 
     # Mutual clash: both combatants attack aggressively
     if s1_speed >= mutual_clash_min_speed and s2_speed >= mutual_clash_min_speed:
@@ -186,6 +195,7 @@ def evaluate_duel_clash(
                 is_mutual=True,
                 is_parry=False,
                 disarmed_slot=None,
+                shockwave_type="heavy",
                 banner_text="MUTUAL CLASH!",
                 banner_color=(0, 255, 255),
                 reason="mutual_attack",
@@ -196,10 +206,12 @@ def evaluate_duel_clash(
         atk_speed, def_speed = s1_speed, s2_speed
         atk_slot, def_slot = "Person1", "Person2"
         t_def = collision.ratio2
+        def_poise = s2_poise
     else:
         atk_speed, def_speed = s2_speed, s1_speed
         atk_slot, def_slot = "Person2", "Person1"
         t_def = collision.ratio1
+        def_poise = s1_poise
 
     # Check if this qualifies as a forceful attack strike
     is_strike = (
@@ -208,40 +220,78 @@ def evaluate_duel_clash(
     )
 
     if not is_strike:
-        return DuelClashResult(is_clash=True, reason="regular_contact")
+        return DuelClashResult(is_clash=True, shockwave_type="normal", reason="regular_contact")
 
     # Calculate crossing angle between blades
     dot = abs(s1_dir[0] * s2_dir[0] + s1_dir[1] * s2_dir[1])
     dot = min(1.0, max(0.0, dot))
     cross_angle_deg = math.degrees(math.acos(dot))
 
-    # Condition 1: Missed parry due to parallel slip
-    if cross_angle_deg < parry_min_angle_deg:
+    # Active Deflection: PERFECT PARRY!
+    if def_speed >= 110.0 and t_def <= 0.65 and cross_angle_deg >= 35.0:
         return DuelClashResult(
             is_clash=True,
-            is_parry=False,
-            disarmed_slot=def_slot,
-            banner_text=f"{def_slot} DISARMED! (MISSED PARRY: SLIPPED)",
-            banner_color=(30, 60, 255),
-            reason="parallel_angle_miss",
+            is_parry=True,
+            is_perfect_parry=True,
+            disarmed_slot=None,
+            shockwave_type="perfect",
+            banner_text=f">> {def_slot} PERFECT PARRY! <<",
+            banner_color=(255, 255, 0),
+            reason="perfect_deflection",
         )
+
+    # Condition 1: Missed parry due to parallel slip
+    if cross_angle_deg < parry_min_angle_deg:
+        if def_poise > 1:
+            return DuelClashResult(
+                is_clash=True,
+                is_parry=False,
+                poise_damaged_slot=def_slot,
+                shockwave_type="heavy",
+                banner_text=f"! {def_slot} GUARD SHAKEN! [1 GUARD LEFT] (SLIPPED) !",
+                banner_color=(0, 165, 255),
+                reason="guard_shaken_slipped",
+            )
+        else:
+            return DuelClashResult(
+                is_clash=True,
+                is_parry=False,
+                disarmed_slot=def_slot,
+                shockwave_type="heavy",
+                banner_text=f"{def_slot} DISARMED! (MISSED PARRY: SLIPPED)",
+                banner_color=(30, 60, 255),
+                reason="parallel_angle_miss",
+            )
 
     # Condition 2: Missed parry due to weak tip leverage
     if t_def > parry_max_foible_ratio:
-        return DuelClashResult(
-            is_clash=True,
-            is_parry=False,
-            disarmed_slot=def_slot,
-            banner_text=f"{def_slot} DISARMED! (MISSED PARRY: WEAK TIP)",
-            banner_color=(30, 60, 255),
-            reason="foible_tip_overwhelmed",
-        )
+        if def_poise > 1:
+            return DuelClashResult(
+                is_clash=True,
+                is_parry=False,
+                poise_damaged_slot=def_slot,
+                shockwave_type="heavy",
+                banner_text=f"! {def_slot} GUARD SHAKEN! [1 GUARD LEFT] (WEAK TIP) !",
+                banner_color=(0, 165, 255),
+                reason="guard_shaken_weak_tip",
+            )
+        else:
+            return DuelClashResult(
+                is_clash=True,
+                is_parry=False,
+                disarmed_slot=def_slot,
+                shockwave_type="heavy",
+                banner_text=f"{def_slot} DISARMED! (MISSED PARRY: WEAK TIP)",
+                banner_color=(30, 60, 255),
+                reason="foible_tip_overwhelmed",
+            )
 
-    # Condition 3: Successful parry! Blocked with forte at good angle
+    # Condition 3: Solid Block! Blocked with forte at good angle
     return DuelClashResult(
         is_clash=True,
         is_parry=True,
         disarmed_slot=None,
+        shockwave_type="normal",
         banner_text=f"{def_slot} PARRIED!",
         banner_color=(0, 255, 128),
         reason="forte_parry_success",

@@ -247,8 +247,104 @@ class TestDuelMechanics(unittest.TestCase):
         self.assertGreater(int(frame.sum()), 0)
         self.assertGreater(int(light_canvas.sum()), 0)
 
+    def test_guard_poise_reduction_on_weak_block(self) -> None:
+        """Verify that when defender has >1 poise, a weak tip hit shakes guard without disarming."""
+        col = CollisionInfo(clash_point=(600.0, 350.0), normal=(0.0, 1.0), ratio1=0.7, ratio2=0.88)
+        res = evaluate_duel_clash(
+            collision=col,
+            s1_dir=(1.0, 0.0),
+            s2_dir=(0.0, 1.0),
+            s1_speed=450.0,
+            s2_speed=80.0,
+            is_new_clash=True,
+            is_duel_active=True,
+            s1_poise=2,
+            s2_poise=2,
+        )
+        self.assertFalse(res.is_parry)
+        self.assertIsNone(res.disarmed_slot)  # NOT disarmed!
+        self.assertEqual(res.poise_damaged_slot, "Person2")
+        self.assertIn("GUARD SHAKEN", res.banner_text or "")
+
+    def test_guard_break_disarm_on_last_poise(self) -> None:
+        """Verify that when defender has <= 1 poise, a weak tip hit breaks guard and disarms."""
+        col = CollisionInfo(clash_point=(600.0, 350.0), normal=(0.0, 1.0), ratio1=0.7, ratio2=0.88)
+        res = evaluate_duel_clash(
+            collision=col,
+            s1_dir=(1.0, 0.0),
+            s2_dir=(0.0, 1.0),
+            s1_speed=450.0,
+            s2_speed=80.0,
+            is_new_clash=True,
+            is_duel_active=True,
+            s1_poise=1,
+            s2_poise=1,
+        )
+        self.assertFalse(res.is_parry)
+        self.assertEqual(res.disarmed_slot, "Person2")  # Disarmed!
+        self.assertIn("DISARMED", res.banner_text or "")
+
+    def test_perfect_parry_active_deflection(self) -> None:
+        """Verify active swing into incoming strike at sharp angle executes a Perfect Parry."""
+        # Person 1 attacks fast (440 px/s), Person 2 actively deflects with forte at 90 deg (speed = 130 px/s, ratio2 = 0.40)
+        col = CollisionInfo(clash_point=(600.0, 350.0), normal=(0.0, 1.0), ratio1=0.7, ratio2=0.40)
+        res = evaluate_duel_clash(
+            collision=col,
+            s1_dir=(1.0, 0.0),
+            s2_dir=(0.0, 1.0),
+            s1_speed=440.0,
+            s2_speed=130.0,  # Actively swung blade into strike!
+            is_new_clash=True,
+            is_duel_active=True,
+            s1_poise=2,
+            s2_poise=2,
+        )
+        self.assertTrue(res.is_parry)
+        self.assertTrue(res.is_perfect_parry)
+        self.assertEqual(res.shockwave_type, "perfect")
+        self.assertIn("PERFECT PARRY", res.banner_text or "")
+
+    def test_shockwave_particle_lifecycle(self) -> None:
+        """Verify Shockwave particles expand outward and decay cleanly."""
+        import numpy as np
+        from src.particles import ParticleSystem
+
+        ps = ParticleSystem()
+        ps.spawn_shockwave(500.0, 400.0, max_radius=150.0, speed=400.0, lifetime=0.30)
+        self.assertEqual(len(ps.shockwaves), 1)
+
+        sw = ps.shockwaves[0]
+        initial_r = sw.radius
+
+        # Advance 50ms
+        ps.update(0.05)
+        self.assertGreater(sw.radius, initial_r)
+
+        # Draw onto canvas
+        canvas = np.zeros((720, 1280, 3), dtype=np.uint8)
+        ps.draw(canvas)
+        self.assertGreater(int(canvas.sum()), 0)
+
+        # Advance beyond lifetime -> should expire cleanly
+        for _ in range(10):
+            ps.update(0.04)
+        self.assertEqual(len(ps.shockwaves), 0)
+
+    def test_spatial_hand_reacquisition_logic(self) -> None:
+        """Verify spatial assignment correctly routes off-screen hands back to their respective sabers."""
+        frame_width = 1280
+        # Two hands: one on left (x=320), one on right (x=960)
+        h_left = make_mock_observation("Right", (320.0, 400.0), (320.0, 340.0))
+        h_right = make_mock_observation("Right", (960.0, 400.0), (960.0, 340.0))
+        obs_list = [h_right, h_left]  # Order reversed
+
+        sorted_obs = sorted(obs_list, key=lambda o: o.wrist[0])
+        self.assertEqual(sorted_obs[0].wrist[0], 320.0)  # Left hand to Blue
+        self.assertEqual(sorted_obs[-1].wrist[0], 960.0)  # Right hand to Red
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 

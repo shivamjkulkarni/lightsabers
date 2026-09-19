@@ -129,9 +129,17 @@ def main() -> None:
     match_winner_color: Tuple[int, int, int] = config.saber.jedi_blue
     active_banner_text: Optional[str] = None
     active_banner_color: Tuple[int, int, int] = (0, 255, 128)
-    active_banner_expiry: float = 0.0
     was_colliding_last_frame: bool = False
     post_disarm_timer: float = 0.0
+
+    # Combat engagement: Guard Poise, Rally Streaks, and Active Deflections
+    poise_blue: int = 2
+    poise_red: int = 2
+    rally_streak: int = 0
+    last_clash_time: float = 0.0
+    clash_duration: float = 0.0
+    counter_strike_slot: Optional[str] = None
+    counter_strike_expiry: float = 0.0
 
     try:
         with Camera(
@@ -231,28 +239,60 @@ def main() -> None:
                                     active_banner_expiry = curr_time + 1.5
 
                 # -------------------------------------------------------------
-                # TRACK & UPDATE MATCHING HANDS FOR EACH SABER
+                # TRACK & UPDATE MATCHING HANDS FOR EACH SABER (SPATIAL PARTITION)
                 # -------------------------------------------------------------
                 matched_blue_obs = None
                 matched_red_obs = None
 
-                if s_blue.is_ignited and s_blue.assigned_wrist_pos:
-                    best_dist = 280.0
-                    for obs in observations:
-                        dist = math.hypot(obs.wrist[0] - s_blue.assigned_wrist_pos[0], obs.wrist[1] - s_blue.assigned_wrist_pos[1])
-                        if dist < best_dist:
-                            best_dist = dist
-                            matched_blue_obs = obs
+                # Spatial hand assignment: Person 1 (Blue) is on the left; Person 2 (Red) is on the right.
+                # When hands leave the frame and re-enter, spatial matching ensures immediate re-acquisition
+                # without any arbitrary distance clamps.
+                if len(observations) >= 2:
+                    sorted_obs = sorted(observations, key=lambda o: o.wrist[0])
+                    obs_left = sorted_obs[0]
+                    obs_right = sorted_obs[-1]
 
-                if s_red.is_ignited and s_red.assigned_wrist_pos:
-                    best_dist = 280.0
-                    for obs in observations:
-                        if obs is matched_blue_obs:
-                            continue
-                        dist = math.hypot(obs.wrist[0] - s_red.assigned_wrist_pos[0], obs.wrist[1] - s_red.assigned_wrist_pos[1])
-                        if dist < best_dist:
-                            best_dist = dist
-                            matched_red_obs = obs
+                    if s_blue.is_ignited and not s_blue.is_disarmed:
+                        matched_blue_obs = obs_left
+                        s_blue.assigned_wrist_pos = obs_left.wrist
+
+                    if s_red.is_ignited and not s_red.is_disarmed:
+                        matched_red_obs = obs_right
+                        s_red.assigned_wrist_pos = obs_right.wrist
+
+                elif len(observations) == 1:
+                    single_obs = observations[0]
+                    mid_x = frame_width * 0.50
+
+                    if s_blue.is_ignited and not s_red.is_ignited and not s_blue.is_disarmed:
+                        matched_blue_obs = single_obs
+                        s_blue.assigned_wrist_pos = single_obs.wrist
+                    elif s_red.is_ignited and not s_blue.is_ignited and not s_red.is_disarmed:
+                        matched_red_obs = single_obs
+                        s_red.assigned_wrist_pos = single_obs.wrist
+                    elif s_blue.is_ignited and s_red.is_ignited:
+                        # Both are ignited - match based on disarm status, distance, or screen half
+                        if s_blue.is_disarmed:
+                            matched_red_obs = single_obs
+                            s_red.assigned_wrist_pos = single_obs.wrist
+                        elif s_red.is_disarmed:
+                            matched_blue_obs = single_obs
+                            s_blue.assigned_wrist_pos = single_obs.wrist
+                        elif s_blue.assigned_wrist_pos and s_red.assigned_wrist_pos:
+                            d_blue = math.hypot(single_obs.wrist[0] - s_blue.assigned_wrist_pos[0], single_obs.wrist[1] - s_blue.assigned_wrist_pos[1])
+                            d_red = math.hypot(single_obs.wrist[0] - s_red.assigned_wrist_pos[0], single_obs.wrist[1] - s_red.assigned_wrist_pos[1])
+                            if d_blue < d_red:
+                                matched_blue_obs = single_obs
+                                s_blue.assigned_wrist_pos = single_obs.wrist
+                            else:
+                                matched_red_obs = single_obs
+                                s_red.assigned_wrist_pos = single_obs.wrist
+                        elif single_obs.wrist[0] < mid_x:
+                            matched_blue_obs = single_obs
+                            s_blue.assigned_wrist_pos = single_obs.wrist
+                        else:
+                            matched_red_obs = single_obs
+                            s_red.assigned_wrist_pos = single_obs.wrist
 
                 # Update Blue Saber with dynamic distance scaling
                 if matched_blue_obs is not None:
@@ -316,23 +356,21 @@ def main() -> None:
                 active_saber_count = sum(1 for s in sabers.values() if s.is_active and s.is_ignited)
 
                 if duel_state == "AWAITING_IGNITION":
-                    if active_saber_count == 2:
+                    if s_blue.is_ignited and s_red.is_ignited:
                         duel_state = "COUNTDOWN"
                         countdown_time_left = config.duel.countdown_seconds
                 elif duel_state == "COUNTDOWN":
-                    if active_saber_count < 2:
-                        # Combatant lowered hand or extinguished blade
-                        duel_state = "AWAITING_IGNITION"
-                    else:
-                        countdown_time_left -= dt
-                        if countdown_time_left <= 0.0:
-                            duel_state = "DUEL_ACTIVE"
-                            active_banner_text = "ENGAGE! DUEL ACTIVE"
-                            active_banner_color = (0, 255, 255)
-                            active_banner_expiry = curr_time + 1.2
+                    # Monotonic countdown: do NOT cancel back to AWAITING_IGNITION if a hand moves off-screen!
+                    countdown_time_left -= dt
+                    if countdown_time_left <= 0.0:
+                        duel_state = "DUEL_ACTIVE"
+                        active_banner_text = "ENGAGE! DUEL ACTIVE"
+                        active_banner_color = (0, 255, 255)
+                        active_banner_expiry = curr_time + 1.2
                 elif duel_state == "DUEL_ACTIVE":
-                    if active_saber_count < 2 and not s_blue.is_disarmed and not s_red.is_disarmed:
-                        duel_state = "AWAITING_IGNITION"
+                    # Rally streak cools down after 3.0s of inactivity
+                    if curr_time - last_clash_time > 3.0:
+                        rally_streak = 0
                 elif duel_state == "ROUND_OVER":
                     if curr_time >= post_disarm_timer:
                         # Check match victory condition: first to wins_to_win (2) or completed max_rounds (3)
@@ -360,6 +398,12 @@ def main() -> None:
                             current_round += 1
                             s_blue.reset()
                             s_red.reset()
+                            poise_blue = 2
+                            poise_red = 2
+                            rally_streak = 0
+                            clash_duration = 0.0
+                            counter_strike_slot = None
+                            counter_strike_expiry = 0.0
                             duel_state = "AWAITING_IGNITION"
                             countdown_time_left = config.duel.countdown_seconds
                             active_banner_text = f"ROUND {current_round} - RE-IGNITE SABERS!"
@@ -389,25 +433,41 @@ def main() -> None:
                         is_currently_colliding = True
                         is_new_clash = not was_colliding_last_frame
 
-                        # 1. Spawn radiant clash sparks along contact plane
-                        particle_system.spawn_clash_sparks(
-                            collision.clash_point[0],
-                            collision.clash_point[1],
-                            collision.normal[0],
-                            collision.normal[1],
-                            count=28,
-                        )
+                        if is_new_clash:
+                            clash_duration = 0.0
+                            last_clash_time = curr_time
+                            rally_streak += 1
+                        else:
+                            clash_duration += dt
 
-                        # 2. Evaluate duel combat mechanics (parry vs missed parry)
+                        # Continuous electrical crackle sparks during sustained blade bind (Saber Lock)
+                        if clash_duration > 0.22 and duel_state == "DUEL_ACTIVE":
+                            particle_system.spawn_clash_sparks(
+                                collision.clash_point[0],
+                                collision.clash_point[1],
+                                collision.normal[0],
+                                collision.normal[1],
+                                count=8,
+                                speed_min=80.0,
+                                speed_max=220.0,
+                            )
+
+                        # Evaluate duel combat mechanics
                         if s_blue.current_direction and s_red.current_direction:
+                            # Apply counter-strike advantage (+35% speed boost for 1.2s after a perfect parry)
+                            v1 = s_blue.tip_speed * (1.35 if counter_strike_slot == "Person1" and curr_time < counter_strike_expiry else 1.0)
+                            v2 = s_red.tip_speed * (1.35 if counter_strike_slot == "Person2" and curr_time < counter_strike_expiry else 1.0)
+
                             clash_eval = evaluate_duel_clash(
                                 collision=collision,
                                 s1_dir=s_blue.current_direction,
                                 s2_dir=s_red.current_direction,
-                                s1_speed=s_blue.tip_speed,
-                                s2_speed=s_red.tip_speed,
+                                s1_speed=v1,
+                                s2_speed=v2,
                                 is_new_clash=is_new_clash,
                                 is_duel_active=(duel_state == "DUEL_ACTIVE"),
+                                s1_poise=poise_blue,
+                                s2_poise=poise_red,
                                 strike_min_speed=config.duel.strike_min_speed,
                                 strike_speed_ratio=config.duel.strike_speed_ratio,
                                 parry_min_angle_deg=config.duel.parry_min_angle_deg,
@@ -416,13 +476,94 @@ def main() -> None:
                                 mutual_clash_ratio=config.duel.mutual_clash_ratio,
                             )
 
-                            if clash_eval.banner_text:
-                                active_banner_text = clash_eval.banner_text
-                                active_banner_color = clash_eval.banner_color
-                                active_banner_expiry = curr_time + 1.8
+                            # Spawn appropriate sparks and plasma shockwaves
+                            if is_new_clash:
+                                if clash_eval.shockwave_type == "perfect":
+                                    particle_system.spawn_shockwave(
+                                        collision.clash_point[0],
+                                        collision.clash_point[1],
+                                        max_radius=190.0,
+                                        speed=520.0,
+                                        lifetime=0.40,
+                                        color=(255, 255, 120),
+                                        thickness=5,
+                                    )
+                                    particle_system.spawn_clash_sparks(
+                                        collision.clash_point[0],
+                                        collision.clash_point[1],
+                                        collision.normal[0],
+                                        collision.normal[1],
+                                        count=48,
+                                        speed_min=240.0,
+                                        speed_max=580.0,
+                                    )
+                                elif clash_eval.shockwave_type == "heavy":
+                                    particle_system.spawn_shockwave(
+                                        collision.clash_point[0],
+                                        collision.clash_point[1],
+                                        max_radius=145.0,
+                                        speed=440.0,
+                                        lifetime=0.34,
+                                        color=(100, 200, 255),
+                                        thickness=4,
+                                    )
+                                    particle_system.spawn_clash_sparks(
+                                        collision.clash_point[0],
+                                        collision.clash_point[1],
+                                        collision.normal[0],
+                                        collision.normal[1],
+                                        count=36,
+                                        speed_min=200.0,
+                                        speed_max=480.0,
+                                    )
+                                else:
+                                    particle_system.spawn_shockwave(
+                                        collision.clash_point[0],
+                                        collision.clash_point[1],
+                                        max_radius=95.0,
+                                        speed=360.0,
+                                        lifetime=0.25,
+                                        color=(220, 240, 255),
+                                        thickness=2,
+                                    )
+                                    particle_system.spawn_clash_sparks(
+                                        collision.clash_point[0],
+                                        collision.clash_point[1],
+                                        collision.normal[0],
+                                        collision.normal[1],
+                                        count=24,
+                                        speed_min=160.0,
+                                        speed_max=400.0,
+                                    )
 
-                            # Trigger disarm if a combatant missed a parry
-                            if clash_eval.disarmed_slot is not None:
+                            # 1. Handle Perfect Parry
+                            if clash_eval.is_perfect_parry:
+                                if clash_eval.banner_text and "Person1" in clash_eval.banner_text:
+                                    poise_blue = min(2, poise_blue + 1)
+                                    counter_strike_slot = "Person1"
+                                    active_banner_text = ">> JEDI PERFECT PARRY! (COUNTER READY) <<"
+                                    active_banner_color = (255, 220, 0)
+                                else:
+                                    poise_red = min(2, poise_red + 1)
+                                    counter_strike_slot = "Person2"
+                                    active_banner_text = ">> SITH PERFECT PARRY! (COUNTER READY) <<"
+                                    active_banner_color = (255, 220, 0)
+                                counter_strike_expiry = curr_time + 1.2
+                                active_banner_expiry = curr_time + 1.5
+
+                            # 2. Handle Guard Poise Damage (Guard Shaken)
+                            elif clash_eval.poise_damaged_slot is not None:
+                                if clash_eval.poise_damaged_slot == "Person1":
+                                    poise_blue = max(1, poise_blue - 1)
+                                    active_banner_text = "! JEDI GUARD SHAKEN! [1 POISE LEFT] !"
+                                else:
+                                    poise_red = max(1, poise_red - 1)
+                                    active_banner_text = "! SITH GUARD SHAKEN! [1 POISE LEFT] !"
+                                active_banner_color = (0, 165, 255)
+                                active_banner_expiry = curr_time + 1.6
+
+                            # 3. Handle Disarm (Guard Broken -> Round Win)
+                            elif clash_eval.disarmed_slot is not None:
                                 victim_slot = clash_eval.disarmed_slot
                                 victim = sabers[victim_slot]
                                 floor_y = frame_height - 20.0
@@ -453,17 +594,37 @@ def main() -> None:
                                     )
                                 )
                                 victim.disarm(curr_time, duration=3.5)
+                                rally_streak = 0
                                 if victim_slot == "Person2":
                                     score_blue += 1
-                                    active_banner_text = f"JEDI WINS ROUND {current_round}!"
+                                    active_banner_text = f">>> SITH GUARD BROKEN! JEDI WINS ROUND {current_round}! <<<"
                                     active_banner_color = config.saber.jedi_blue
                                 else:
                                     score_red += 1
-                                    active_banner_text = f"SITH WINS ROUND {current_round}!"
+                                    active_banner_text = f">>> JEDI GUARD BROKEN! SITH WINS ROUND {current_round}! <<<"
                                     active_banner_color = config.saber.sith_red
                                 active_banner_expiry = curr_time + 2.8
                                 duel_state = "ROUND_OVER"
                                 post_disarm_timer = curr_time + config.duel.post_disarm_cooldown
+
+                            # 4. Handle Rally Streaks and other banners
+                            elif is_new_clash:
+                                if clash_eval.is_mutual:
+                                    active_banner_text = "== MUTUAL CLASH! =="
+                                    active_banner_color = (0, 255, 255)
+                                    active_banner_expiry = curr_time + 1.2
+                                elif rally_streak >= 2:
+                                    if rally_streak >= 4:
+                                        active_banner_text = f"*** RALLY x{rally_streak}! EPIC CLASH! ***"
+                                        active_banner_color = (0, 215, 255)
+                                    else:
+                                        active_banner_text = f">> RALLY x{rally_streak}! <<"
+                                        active_banner_color = (0, 255, 255)
+                                    active_banner_expiry = curr_time + 1.1
+                                elif clash_eval.banner_text:
+                                    active_banner_text = clash_eval.banner_text
+                                    active_banner_color = clash_eval.banner_color
+                                    active_banner_expiry = curr_time + 1.3
 
                 was_colliding_last_frame = is_currently_colliding
 
@@ -580,28 +741,55 @@ def main() -> None:
                     scoreboard_str = f"ROUND {current_round}/{config.duel.max_rounds}   [ JEDI BLUE: {score_blue}  |  SITH RED: {score_red} ]"
                     draw_centered_text(frame, scoreboard_str, y=32, font_scale=0.65, color=(255, 255, 255), thickness=2)
 
+                    # Guard Poise Status Bar
+                    if s_blue.is_ignited or s_red.is_ignited:
+                        blue_sh = "+ " * poise_blue + "- " * (2 - poise_blue)
+                        red_sh = "+ " * poise_red + "- " * (2 - poise_red)
+                        poise_hud = f"JEDI GUARD: [ {blue_sh.strip()} ]         SITH GUARD: [ {red_sh.strip()} ]"
+                        draw_centered_text(frame, poise_hud, y=60, font_scale=0.55, color=(0, 230, 255), thickness=2)
+
                     if duel_state == "AWAITING_IGNITION":
                         status_str = f"AWAITING JEDI & SITH IGNITION ({active_saber_count}/2 ACTIVE)"
-                        draw_centered_text(frame, status_str, y=62, font_scale=0.55, color=(160, 200, 255), thickness=2)
+                        draw_centered_text(frame, status_str, y=88, font_scale=0.52, color=(160, 200, 255), thickness=2)
                     elif duel_state == "COUNTDOWN":
                         sec_num = int(math.ceil(countdown_time_left))
                         cd_text = f"DUEL IN: {sec_num}" if sec_num > 0 else "ENGAGE!"
-                        draw_centered_text(frame, cd_text, y=105, font_scale=1.4, color=(0, 230, 255), thickness=4)
+                        draw_centered_text(frame, cd_text, y=115, font_scale=1.4, color=(0, 230, 255), thickness=4)
                     elif duel_state == "DUEL_ACTIVE":
-                        draw_centered_text(
-                            frame,
-                            "[ DUEL ACTIVE: PARRY OR BE DISARMED ]",
-                            y=62,
-                            font_scale=0.55,
-                            color=(0, 255, 180),
-                            thickness=2,
-                        )
+                        if clash_duration > 0.22:
+                            draw_centered_text(
+                                frame,
+                                ">> [ SABER LOCK! PUSH OFF! ] <<",
+                                y=88,
+                                font_scale=0.58,
+                                color=(0, 255, 255),
+                                thickness=2,
+                            )
+                        elif counter_strike_slot and curr_time < counter_strike_expiry:
+                            c_name = "JEDI" if counter_strike_slot == "Person1" else "SITH"
+                            draw_centered_text(
+                                frame,
+                                f">> {c_name} COUNTER-STRIKE READY! (+35% SPEED) <<",
+                                y=88,
+                                font_scale=0.55,
+                                color=(255, 220, 0),
+                                thickness=2,
+                            )
+                        else:
+                            draw_centered_text(
+                                frame,
+                                "[ DUEL ACTIVE: PARRY TO PRESERVE GUARD POISE ]",
+                                y=88,
+                                font_scale=0.52,
+                                color=(0, 255, 180),
+                                thickness=2,
+                            )
                     elif duel_state == "ROUND_OVER":
                         draw_centered_text(
                             frame,
                             f"ROUND {current_round} OVER - PREPARING NEXT ROUND...",
-                            y=62,
-                            font_scale=0.58,
+                            y=88,
+                            font_scale=0.56,
                             color=(30, 100, 255),
                             thickness=2,
                         )
@@ -611,8 +799,8 @@ def main() -> None:
                         draw_centered_text(
                             frame,
                             active_banner_text,
-                            y=150,
-                            font_scale=1.0,
+                            y=155,
+                            font_scale=0.95,
                             color=active_banner_color,
                             thickness=3,
                             outline_thickness=7,
@@ -729,6 +917,12 @@ def main() -> None:
                     current_round = 1
                     score_blue = 0
                     score_red = 0
+                    poise_blue = 2
+                    poise_red = 2
+                    rally_streak = 0
+                    clash_duration = 0.0
+                    counter_strike_slot = None
+                    counter_strike_expiry = 0.0
                     match_winner_name = None
                     duel_state = "AWAITING_IGNITION"
                     countdown_time_left = config.duel.countdown_seconds
