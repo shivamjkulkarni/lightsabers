@@ -1,7 +1,7 @@
 """Geometry helpers for saber direction, endpoint, and vector mathematics."""
 
 import math
-from typing import Tuple
+from typing import Any, Tuple
 
 Point2D = Tuple[float, float]
 Vector2D = Tuple[float, float]
@@ -26,6 +26,22 @@ def lerp(p1: Point2D, p2: Point2D, t: float) -> Point2D:
         p1[0] + (p2[0] - p1[0]) * t,
         p1[1] + (p2[1] - p1[1]) * t,
     )
+
+
+def angle(v: Vector2D) -> float:
+    """Angle of 2D vector in radians from positive x-axis."""
+    return math.atan2(v[1], v[0])
+
+
+def scale_length_for_resolution(
+    base_length: float,
+    current_height: float,
+    reference_height: float = 720.0,
+) -> float:
+    """Scale pixel length proportionally to camera frame height."""
+    if reference_height <= 0.0:
+        return base_length
+    return base_length * (current_height / reference_height)
 
 
 def calculate_saber_direction(
@@ -60,3 +76,13 @@ def calculate_saber_endpoint(
         pivot[0] + direction[0] * blade_length,
         pivot[1] + direction[1] * blade_length,
     )
+
+
+def is_saber_active(hand_observation: Any) -> bool:
+    """
+    Gesture activation hook for lightsaber.
+    
+    Currently activates on any valid hand observation.
+    Future hack-night upgrades can evaluate finger extension / fists.
+    """
+    return hand_observation is not None

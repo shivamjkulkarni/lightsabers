@@ -11,47 +11,85 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import cv2
 from src.camera import Camera
+from src.config import AppConfig
+from src.geometry import scale_length_for_resolution
 from src.hand_tracker import HandTracker, draw_hand_landmarks
 from src.renderer import render_blade, render_hilt, render_trail
 from src.saber import SaberInstance
 
 
 def main() -> None:
-    print("Starting Lightsabers — Dual Saber Mode...")
-    print("Controls: 'q'/ESC: quit | 'g': toggle glow | 't': toggle trail | 'd': toggle debug | 'r': reset")
+    config = AppConfig()
+
+    print("=" * 60)
+    print("      JEDI LIGHTSABERS — REAL-TIME COMPUTER VISION")
+    print("=" * 60)
+    print("Controls:")
+    print("  'q' / ESC : Quit")
+    print("  'g'       : Toggle glow effect")
+    print("  't'       : Toggle motion trail")
+    print("  'd'       : Toggle debug landmarks & HUD")
+    print("  'r'       : Reset saber tracking states")
+    print("=" * 60)
 
     window_name = "Jedi Lightsabers"
     prev_time = time.time()
     fps = 0.0
-    blade_length = 320.0
-    trail_duration = 0.35  # seconds
 
-    show_glow = True
-    show_trail = True
-    show_debug = False
+    show_glow = config.show_glow
+    show_trail = config.show_trail
+    show_debug = config.debug_mode
 
     # Independent sabers for left and right hands
-    # Left hand: Jedi Guardian Blue/Cyan | Right hand: Jedi Consular Emerald Green
     sabers = {
-        "Left": SaberInstance(handedness="Left", color=(255, 120, 30)),
-        "Right": SaberInstance(handedness="Right", color=(30, 255, 120)),
+        "Left": SaberInstance(
+            handedness="Left",
+            color=config.saber.left_color,
+            alpha_pivot=config.saber.alpha_pivot,
+            alpha_direction=config.saber.alpha_direction,
+            grace_period=config.saber.grace_period,
+        ),
+        "Right": SaberInstance(
+            handedness="Right",
+            color=config.saber.right_color,
+            alpha_pivot=config.saber.alpha_pivot,
+            alpha_direction=config.saber.alpha_direction,
+            grace_period=config.saber.grace_period,
+        ),
     }
 
     try:
-        with Camera(camera_index=0, width=1280, height=720, flip_horizontal=True) as camera, \
-             HandTracker(num_hands=2) as tracker:
+        with Camera(
+            camera_index=config.camera.camera_index,
+            width=config.camera.width,
+            height=config.camera.height,
+            flip_horizontal=config.camera.flip_horizontal,
+        ) as camera, HandTracker(
+            model_path=config.tracker.model_path,
+            num_hands=config.tracker.max_hands,
+            min_detection_confidence=config.tracker.min_detection_confidence,
+            min_presence_confidence=config.tracker.min_presence_confidence,
+            min_tracking_confidence=config.tracker.min_tracking_confidence,
+        ) as tracker:
             while True:
                 frame = camera.read()
                 if frame is None:
                     print("Warning: Received empty frame from camera, skipping...")
                     continue
 
+                frame_height, frame_width = frame.shape[:2]
+                blade_length = scale_length_for_resolution(
+                    config.saber.base_blade_length,
+                    frame_height,
+                    config.saber.reference_height,
+                )
+
                 # Compute frame FPS
                 curr_time = time.time()
                 fps = 0.9 * fps + 0.1 * (1.0 / max(curr_time - prev_time, 1e-5))
                 prev_time = curr_time
 
-                # Detect up to 2 hands
+                # Detect hands
                 observations = tracker.detect(frame)
 
                 # Match detected hands to sabers by handedness
@@ -74,7 +112,7 @@ def main() -> None:
                         matched_obs.get(hand_key),
                         curr_time=curr_time,
                         blade_length=blade_length,
-                        trail_duration=trail_duration,
+                        trail_duration=config.saber.trail_duration,
                     )
 
                 # 1. Render motion trails for all sabers
@@ -85,15 +123,31 @@ def main() -> None:
                                 frame,
                                 saber.trail_history,
                                 saber.color,
-                                trail_duration,
+                                config.saber.trail_duration,
                                 curr_time,
                             )
 
                 # 2. Render hilts and luminous blades for active sabers
                 for saber in sabers.values():
-                    if saber.is_active and saber.current_pivot and saber.current_endpoint and saber.current_direction:
-                        render_hilt(frame, saber.current_pivot, saber.current_direction, hilt_length=50.0)
-                        render_blade(frame, saber.current_pivot, saber.current_endpoint, saber.color, show_glow=show_glow)
+                    if (
+                        saber.is_active
+                        and saber.current_pivot
+                        and saber.current_endpoint
+                        and saber.current_direction
+                    ):
+                        render_hilt(
+                            frame,
+                            saber.current_pivot,
+                            saber.current_direction,
+                            hilt_length=config.saber.hilt_length,
+                        )
+                        render_blade(
+                            frame,
+                            saber.current_pivot,
+                            saber.current_endpoint,
+                            saber.color,
+                            show_glow=show_glow,
+                        )
 
                 # 3. Optional Debug Overlay
                 if show_debug:
@@ -137,6 +191,7 @@ def main() -> None:
 
     except FileNotFoundError as e:
         print(f"\nConfiguration Error: {e}", file=sys.stderr)
+        print("Tip: Run 'python3 scripts/download_model.py' to download the model asset.", file=sys.stderr)
         sys.exit(1)
     except RuntimeError as e:
         print(f"\nCamera Error: {e}", file=sys.stderr)
