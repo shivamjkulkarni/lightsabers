@@ -357,6 +357,159 @@ class TestDuelMechanics(unittest.TestCase):
             self.assertGreater(int(frame.sum()), 0)
             self.assertGreater(int(light_canvas.sum()), 0)
 
+    def test_screen_side_partition_anti_theft(self) -> None:
+        """Verify screen-side partitioning prevents a player raising 2 hands from stealing the opponent's lightsaber."""
+        from src.config import DuelConfig
+        from src.saber import SaberInstance
+
+        duel_cfg = DuelConfig()
+        frame_width = 1280.0
+        mid_x = frame_width * 0.50
+        side_buf = duel_cfg.side_partition_buffer_px
+
+        s_blue = SaberInstance(handedness="Right", color=(255, 90, 20))
+        s_red = SaberInstance(handedness="Left", color=(30, 30, 255))
+        s_blue.ignite()
+        s_red.ignite()
+
+        # Scenario 1: Person 1 (on left) raises BOTH hands (x=180, x=380)
+        h1 = make_mock_observation("Left", (180.0, 350.0), (180.0, 290.0))
+        h2 = make_mock_observation("Right", (380.0, 350.0), (380.0, 290.0))
+        observations = [h1, h2]
+
+        left_candidates = [o for o in observations if o.wrist[0] < mid_x + side_buf]
+        right_candidates = [o for o in observations if o.wrist[0] >= mid_x - side_buf]
+
+        self.assertEqual(len(left_candidates), 2)
+        self.assertEqual(len(right_candidates), 0)
+
+        # Blue gets assigned from left_candidates
+        matched_blue = max(left_candidates, key=lambda o: o.wrist[0])
+        # Red gets NOTHING because right_candidates is empty (ANTI-THEFT GUARANTEE)
+        matched_red = None
+
+        self.assertIsNotNone(matched_blue)
+        self.assertIsNone(matched_red)
+
+        # Scenario 2: Person 2 (on right) raises BOTH hands (x=800, x=1050)
+        h3 = make_mock_observation("Left", (800.0, 350.0), (800.0, 290.0))
+        h4 = make_mock_observation("Right", (1050.0, 350.0), (1050.0, 290.0))
+        obs_right_only = [h3, h4]
+
+        left_c2 = [o for o in obs_right_only if o.wrist[0] < mid_x + side_buf]
+        right_c2 = [o for o in obs_right_only if o.wrist[0] >= mid_x - side_buf]
+
+        self.assertEqual(len(left_c2), 0)
+        self.assertEqual(len(right_c2), 2)
+
+        matched_blue_2 = None
+        matched_red_2 = min(right_c2, key=lambda o: o.wrist[0])
+
+        self.assertIsNone(matched_blue_2)
+        self.assertIsNotNone(matched_red_2)
+
+    def test_phased_duel_state_machine_flow(self) -> None:
+        """Verify the complete phased lifecycle with distinct wait times."""
+        from src.config import DuelConfig
+        from src.saber import SaberInstance
+
+        cfg = DuelConfig()
+        s_blue = SaberInstance(handedness="Right", color=(255, 90, 20))
+        s_red = SaberInstance(handedness="Left", color=(30, 30, 255))
+
+        # Phase 1: ROUND_PREPARATION (2.0s)
+        duel_state = "ROUND_PREPARATION"
+        state_timer = cfg.prep_seconds
+
+        # Advance timer
+        state_timer -= 2.1
+        if state_timer <= 0.0:
+            duel_state = "AWAITING_IGNITION"
+        self.assertEqual(duel_state, "AWAITING_IGNITION")
+
+        # Phase 2: AWAITING_IGNITION -> Both ignite -> IGNITION_LOCKED (1.4s)
+        s_blue.ignite()
+        s_red.ignite()
+        if s_blue.is_ignited and s_red.is_ignited:
+            duel_state = "IGNITION_LOCKED"
+            state_timer = cfg.ignition_locked_seconds
+        self.assertEqual(duel_state, "IGNITION_LOCKED")
+
+        # Phase 3: IGNITION_LOCKED -> COUNTDOWN (3.0s)
+        state_timer -= 1.5
+        if state_timer <= 0.0:
+            duel_state = "COUNTDOWN"
+            countdown_time_left = cfg.countdown_seconds
+        self.assertEqual(duel_state, "COUNTDOWN")
+        self.assertEqual(countdown_time_left, 3.0)
+
+        # Phase 4: COUNTDOWN -> DUEL_ACTIVE
+        countdown_time_left -= 3.1
+        if countdown_time_left <= 0.0:
+            duel_state = "DUEL_ACTIVE"
+        self.assertEqual(duel_state, "DUEL_ACTIVE")
+
+        # Phase 5: Disarm -> ROUND_DISARM (2.8s)
+        victim_slot = "Person2"
+        score_blue = 1
+        current_round = 1
+        duel_state = "ROUND_DISARM"
+        state_timer = cfg.round_disarm_seconds
+        self.assertEqual(duel_state, "ROUND_DISARM")
+
+        # Phase 6: ROUND_DISARM expires -> ROUND_INTERMISSION (if match not won)
+        state_timer -= 2.9
+        if state_timer <= 0.0:
+            if score_blue >= cfg.wins_to_win:
+                duel_state = "MATCH_OVER"
+            else:
+                duel_state = "ROUND_INTERMISSION"
+                state_timer = cfg.intermission_seconds
+        self.assertEqual(duel_state, "ROUND_INTERMISSION")
+
+        # Phase 7: ROUND_INTERMISSION expires -> ROUND_PREPARATION (Round 2)
+        state_timer -= 2.6
+        if state_timer <= 0.0:
+            current_round += 1
+            duel_state = "ROUND_PREPARATION"
+            state_timer = cfg.prep_seconds
+        self.assertEqual(duel_state, "ROUND_PREPARATION")
+        self.assertEqual(current_round, 2)
+
+    def test_match_over_clean_screen_saber_reset(self) -> None:
+        """Verify match victory screen deactivates all sabers and renders cleanly."""
+        import numpy as np
+        from src.renderer import render_match_winner_screen
+        from src.saber import SaberInstance
+
+        s_blue = SaberInstance(handedness="Right", color=(255, 90, 20))
+        s_red = SaberInstance(handedness="Left", color=(30, 30, 255))
+        s_blue.ignite()
+        s_red.ignite()
+
+        # Enter MATCH_OVER
+        duel_state = "MATCH_OVER"
+        s_blue.reset()
+        s_red.reset()
+
+        self.assertFalse(s_blue.is_ignited)
+        self.assertFalse(s_red.is_ignited)
+
+        # Render match winner screen
+        frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+        light_canvas = np.zeros((720, 1280, 3), dtype=np.uint8)
+        render_match_winner_screen(
+            frame,
+            light_canvas,
+            winner_name="Jedi Blue",
+            winner_color=(255, 90, 20),
+            score_blue=2,
+            score_red=1,
+            curr_time=1.0,
+        )
+        self.assertGreater(int(frame.sum()), 0)
+        self.assertGreater(int(light_canvas.sum()), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

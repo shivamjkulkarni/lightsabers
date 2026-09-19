@@ -123,10 +123,12 @@ def main() -> None:
     particle_system = ParticleSystem(gravity=850.0, drag=0.93)
     falling_sabers: List[FallingSaber] = []
 
-    # Duel state machine: "TUTORIAL" -> "AWAITING_IGNITION" -> "COUNTDOWN" -> "DUEL_ACTIVE" -> "ROUND_OVER" -> "MATCH_OVER"
-    duel_state = "TUTORIAL" if config.duel.enable_tutorial else "AWAITING_IGNITION"
+    # Duel state machine:
+    # "TUTORIAL" -> "ROUND_PREPARATION" -> "AWAITING_IGNITION" -> "IGNITION_LOCKED" -> "COUNTDOWN" -> "DUEL_ACTIVE" -> "ROUND_DISARM" -> "ROUND_INTERMISSION" -> "MATCH_OVER"
+    duel_state = "TUTORIAL" if config.duel.enable_tutorial else "ROUND_PREPARATION"
     tutorial_slide: int = 1
     countdown_time_left = config.duel.countdown_seconds
+    state_timer: float = config.duel.prep_seconds if not config.duel.enable_tutorial else 0.0
     current_round: int = 1
     score_blue: int = 0
     score_red: int = 0
@@ -134,6 +136,7 @@ def main() -> None:
     match_winner_color: Tuple[int, int, int] = config.saber.jedi_blue
     active_banner_text: Optional[str] = None
     active_banner_color: Tuple[int, int, int] = (0, 255, 128)
+    active_banner_expiry: float = 0.0
     was_colliding_last_frame: bool = False
     post_disarm_timer: float = 0.0
 
@@ -202,102 +205,94 @@ def main() -> None:
                 has_hand_in_left = False
                 has_hand_in_right = False
 
-                # Check unassigned hands for ignition gestures within their respective chambers
-                for obs in observations:
-                    is_near_blue = (
-                        s_blue.is_ignited
-                        and s_blue.assigned_wrist_pos is not None
-                        and math.hypot(obs.wrist[0] - s_blue.assigned_wrist_pos[0], obs.wrist[1] - s_blue.assigned_wrist_pos[1]) < 220.0
-                    )
-                    is_near_red = (
-                        s_red.is_ignited
-                        and s_red.assigned_wrist_pos is not None
-                        and math.hypot(obs.wrist[0] - s_red.assigned_wrist_pos[0], obs.wrist[1] - s_red.assigned_wrist_pos[1]) < 220.0
-                    )
+                # Ignition gestures are STRICTLY evaluated only while awaiting ignition
+                if duel_state == "AWAITING_IGNITION":
+                    mid_x = frame_width * 0.50
+                    for obs in observations:
+                        is_near_blue = (
+                            s_blue.is_ignited
+                            and s_blue.assigned_wrist_pos is not None
+                            and math.hypot(obs.wrist[0] - s_blue.assigned_wrist_pos[0], obs.wrist[1] - s_blue.assigned_wrist_pos[1]) < 220.0
+                        )
+                        is_near_red = (
+                            s_red.is_ignited
+                            and s_red.assigned_wrist_pos is not None
+                            and math.hypot(obs.wrist[0] - s_red.assigned_wrist_pos[0], obs.wrist[1] - s_red.assigned_wrist_pos[1]) < 220.0
+                        )
 
-                    # Hand is free to ignite a lightsaber
-                    if not is_near_blue and not is_near_red:
-                        # 1. Left Chamber -> Two-Finger Focus ignites Jedi Blue
-                        if not s_blue.is_ignited and not s_blue.is_disarmed:
-                            if is_hand_in_box(obs.wrist, obs.knuckles_center, left_box_rect, palm_center=obs.palm_center):
-                                has_hand_in_left = True
-                                is_jedi = is_two_finger_pose(obs.landmarks_3d) or is_two_finger_pose(obs.landmarks)
-                                if is_jedi:
-                                    s_blue.ignite()
-                                    s_blue.assigned_wrist_pos = obs.wrist
-                                    particle_system.spawn_clash_sparks(obs.knuckles_center[0], obs.knuckles_center[1], count=30)
-                                    active_banner_text = "JEDI BLUE IGNITED!"
-                                    active_banner_color = (255, 140, 0)
-                                    active_banner_expiry = curr_time + 1.5
+                        # Hand is free to ignite a lightsaber
+                        if not is_near_blue and not is_near_red:
+                            # 1. Left Chamber (Left side of screen) -> Two-Finger Focus ignites Jedi Blue
+                            if obs.wrist[0] < mid_x and not s_blue.is_ignited and not s_blue.is_disarmed:
+                                if is_hand_in_box(obs.wrist, obs.knuckles_center, left_box_rect, palm_center=obs.palm_center):
+                                    has_hand_in_left = True
+                                    is_jedi = is_two_finger_pose(obs.landmarks_3d) or is_two_finger_pose(obs.landmarks)
+                                    if is_jedi:
+                                        s_blue.ignite()
+                                        s_blue.assigned_wrist_pos = obs.wrist
+                                        particle_system.spawn_clash_sparks(obs.knuckles_center[0], obs.knuckles_center[1], count=30)
+                                        active_banner_text = "JEDI BLUE IGNITED!"
+                                        active_banner_color = (255, 140, 0)
+                                        active_banner_expiry = curr_time + 1.5
 
-                        # 2. Right Chamber -> Force Push ignites Sith Red
-                        if not s_red.is_ignited and not s_red.is_disarmed:
-                            if is_hand_in_box(obs.wrist, obs.knuckles_center, right_box_rect, palm_center=obs.palm_center):
-                                has_hand_in_right = True
-                                is_sith = is_force_push_pose(obs.landmarks_3d) or is_force_push_pose(obs.landmarks)
-                                if is_sith:
-                                    s_red.ignite()
-                                    s_red.assigned_wrist_pos = obs.wrist
-                                    particle_system.spawn_clash_sparks(obs.knuckles_center[0], obs.knuckles_center[1], count=30)
-                                    active_banner_text = "SITH RED IGNITED!"
-                                    active_banner_color = (30, 40, 255)
-                                    active_banner_expiry = curr_time + 1.5
+                            # 2. Right Chamber (Right side of screen) -> Force Push ignites Sith Red
+                            if obs.wrist[0] >= mid_x and not s_red.is_ignited and not s_red.is_disarmed:
+                                if is_hand_in_box(obs.wrist, obs.knuckles_center, right_box_rect, palm_center=obs.palm_center):
+                                    has_hand_in_right = True
+                                    is_sith = is_force_push_pose(obs.landmarks_3d) or is_force_push_pose(obs.landmarks)
+                                    if is_sith:
+                                        s_red.ignite()
+                                        s_red.assigned_wrist_pos = obs.wrist
+                                        particle_system.spawn_clash_sparks(obs.knuckles_center[0], obs.knuckles_center[1], count=30)
+                                        active_banner_text = "SITH RED IGNITED!"
+                                        active_banner_color = (30, 40, 255)
+                                        active_banner_expiry = curr_time + 1.5
 
                 # -------------------------------------------------------------
-                # TRACK & UPDATE MATCHING HANDS FOR EACH SABER (SPATIAL PARTITION)
+                # TRACK & UPDATE MATCHING HANDS FOR EACH SABER (SCREEN-SIDE PARTITION)
                 # -------------------------------------------------------------
                 matched_blue_obs = None
                 matched_red_obs = None
 
-                # Spatial hand assignment: Person 1 (Blue) is on the left; Person 2 (Red) is on the right.
-                # When hands leave the frame and re-enter, spatial matching ensures immediate re-acquisition
-                # without any arbitrary distance clamps.
-                if len(observations) >= 2:
-                    sorted_obs = sorted(observations, key=lambda o: o.wrist[0])
-                    obs_left = sorted_obs[0]
-                    obs_right = sorted_obs[-1]
+                mid_x = frame_width * 0.50
+                side_buf = config.duel.side_partition_buffer_px
 
-                    if s_blue.is_ignited and not s_blue.is_disarmed:
-                        matched_blue_obs = obs_left
-                        s_blue.assigned_wrist_pos = obs_left.wrist
+                # Partition observations strictly by side of screen to eliminate sword stealing:
+                # Left half is strictly candidate hands for Jedi Blue.
+                # Right half is strictly candidate hands for Sith Red.
+                left_candidates = [o for o in observations if o.wrist[0] < mid_x + side_buf]
+                right_candidates = [o for o in observations if o.wrist[0] >= mid_x - side_buf]
 
-                    if s_red.is_ignited and not s_red.is_disarmed:
-                        matched_red_obs = obs_right
-                        s_red.assigned_wrist_pos = obs_right.wrist
+                # Assign to Jedi Blue from left_candidates only
+                if left_candidates and s_blue.is_ignited and not s_blue.is_disarmed:
+                    if s_blue.assigned_wrist_pos is not None:
+                        matched_blue_obs = min(
+                            left_candidates,
+                            key=lambda o: math.hypot(
+                                o.wrist[0] - s_blue.assigned_wrist_pos[0],
+                                o.wrist[1] - s_blue.assigned_wrist_pos[1],
+                            ),
+                        )
+                    else:
+                        # Prefer the forward / leading weapon hand (rightmost hand on left side)
+                        matched_blue_obs = max(left_candidates, key=lambda o: o.wrist[0])
+                    s_blue.assigned_wrist_pos = matched_blue_obs.wrist
 
-                elif len(observations) == 1:
-                    single_obs = observations[0]
-                    mid_x = frame_width * 0.50
+                # Assign to Sith Red from right_candidates only
+                if right_candidates and s_red.is_ignited and not s_red.is_disarmed:
+                    if s_red.assigned_wrist_pos is not None:
+                        matched_red_obs = min(
+                            right_candidates,
+                            key=lambda o: math.hypot(
+                                o.wrist[0] - s_red.assigned_wrist_pos[0],
+                                o.wrist[1] - s_red.assigned_wrist_pos[1],
+                            ),
+                        )
+                    else:
+                        # Prefer the forward / leading weapon hand (leftmost hand on right side)
+                        matched_red_obs = min(right_candidates, key=lambda o: o.wrist[0])
+                    s_red.assigned_wrist_pos = matched_red_obs.wrist
 
-                    if s_blue.is_ignited and not s_red.is_ignited and not s_blue.is_disarmed:
-                        matched_blue_obs = single_obs
-                        s_blue.assigned_wrist_pos = single_obs.wrist
-                    elif s_red.is_ignited and not s_blue.is_ignited and not s_red.is_disarmed:
-                        matched_red_obs = single_obs
-                        s_red.assigned_wrist_pos = single_obs.wrist
-                    elif s_blue.is_ignited and s_red.is_ignited:
-                        # Both are ignited - match based on disarm status, distance, or screen half
-                        if s_blue.is_disarmed:
-                            matched_red_obs = single_obs
-                            s_red.assigned_wrist_pos = single_obs.wrist
-                        elif s_red.is_disarmed:
-                            matched_blue_obs = single_obs
-                            s_blue.assigned_wrist_pos = single_obs.wrist
-                        elif s_blue.assigned_wrist_pos and s_red.assigned_wrist_pos:
-                            d_blue = math.hypot(single_obs.wrist[0] - s_blue.assigned_wrist_pos[0], single_obs.wrist[1] - s_blue.assigned_wrist_pos[1])
-                            d_red = math.hypot(single_obs.wrist[0] - s_red.assigned_wrist_pos[0], single_obs.wrist[1] - s_red.assigned_wrist_pos[1])
-                            if d_blue < d_red:
-                                matched_blue_obs = single_obs
-                                s_blue.assigned_wrist_pos = single_obs.wrist
-                            else:
-                                matched_red_obs = single_obs
-                                s_red.assigned_wrist_pos = single_obs.wrist
-                        elif single_obs.wrist[0] < mid_x:
-                            matched_blue_obs = single_obs
-                            s_blue.assigned_wrist_pos = single_obs.wrist
-                        else:
-                            matched_red_obs = single_obs
-                            s_red.assigned_wrist_pos = single_obs.wrist
 
                 # Update Blue Saber with dynamic distance scaling
                 if matched_blue_obs is not None:
@@ -360,10 +355,28 @@ def main() -> None:
                 # -------------------------------------------------------------
                 active_saber_count = sum(1 for s in sabers.values() if s.is_active and s.is_ignited)
 
-                if duel_state == "AWAITING_IGNITION":
+                if duel_state == "ROUND_PREPARATION":
+                    state_timer -= dt
+                    if state_timer <= 0.0:
+                        duel_state = "AWAITING_IGNITION"
+                        active_banner_text = "CHAMBERS ACTIVE -- IGNITE SABERS!"
+                        active_banner_color = (0, 255, 180)
+                        active_banner_expiry = curr_time + 1.5
+
+                elif duel_state == "AWAITING_IGNITION":
                     if s_blue.is_ignited and s_red.is_ignited:
+                        duel_state = "IGNITION_LOCKED"
+                        state_timer = config.duel.ignition_locked_seconds
+                        active_banner_text = ">> BOTH SABERS IGNITED -- PREPARE TO DUEL! <<"
+                        active_banner_color = (255, 215, 0)
+                        active_banner_expiry = curr_time + config.duel.ignition_locked_seconds
+
+                elif duel_state == "IGNITION_LOCKED":
+                    state_timer -= dt
+                    if state_timer <= 0.0:
                         duel_state = "COUNTDOWN"
                         countdown_time_left = config.duel.countdown_seconds
+
                 elif duel_state == "COUNTDOWN":
                     # Monotonic countdown: do NOT cancel back to AWAITING_IGNITION if a hand moves off-screen!
                     countdown_time_left -= dt
@@ -372,21 +385,30 @@ def main() -> None:
                         active_banner_text = "ENGAGE! DUEL ACTIVE"
                         active_banner_color = (0, 255, 255)
                         active_banner_expiry = curr_time + 1.2
+
                 elif duel_state == "DUEL_ACTIVE":
                     # Rally streak cools down after 3.0s of inactivity
                     if curr_time - last_clash_time > 3.0:
                         rally_streak = 0
-                elif duel_state == "ROUND_OVER":
-                    if curr_time >= post_disarm_timer:
+
+                elif duel_state == "ROUND_DISARM":
+                    state_timer -= dt
+                    if state_timer <= 0.0:
                         # Check match victory condition: first to wins_to_win (2) or completed max_rounds (3)
                         if score_blue >= config.duel.wins_to_win:
                             duel_state = "MATCH_OVER"
                             match_winner_name = "Jedi Blue"
                             match_winner_color = config.saber.jedi_blue
+                            s_blue.reset()
+                            s_red.reset()
+                            falling_sabers.clear()
                         elif score_red >= config.duel.wins_to_win:
                             duel_state = "MATCH_OVER"
                             match_winner_name = "Sith Red"
                             match_winner_color = config.saber.sith_red
+                            s_blue.reset()
+                            s_red.reset()
+                            falling_sabers.clear()
                         elif current_round >= config.duel.max_rounds:
                             duel_state = "MATCH_OVER"
                             if score_blue > score_red:
@@ -398,22 +420,36 @@ def main() -> None:
                             else:
                                 match_winner_name = "Draw"
                                 match_winner_color = (255, 255, 0)
-                        else:
-                            # Advance to next round - both sabers extinguish for fresh re-ignition!
-                            current_round += 1
                             s_blue.reset()
                             s_red.reset()
-                            poise_blue = 2
-                            poise_red = 2
-                            rally_streak = 0
-                            clash_duration = 0.0
-                            counter_strike_slot = None
-                            counter_strike_expiry = 0.0
-                            duel_state = "AWAITING_IGNITION"
-                            countdown_time_left = config.duel.countdown_seconds
-                            active_banner_text = f"ROUND {current_round} - RE-IGNITE SABERS!"
+                            falling_sabers.clear()
+                        else:
+                            # Advance to scoreboard intermission before next round
+                            duel_state = "ROUND_INTERMISSION"
+                            state_timer = config.duel.intermission_seconds
+                            s_blue.reset()
+                            s_red.reset()
+                            falling_sabers.clear()
+                            active_banner_text = f"ROUND {current_round} COMPLETE -- SCORE: JEDI {score_blue} | SITH {score_red}"
                             active_banner_color = (0, 255, 255)
-                            active_banner_expiry = curr_time + 2.5
+                            active_banner_expiry = curr_time + config.duel.intermission_seconds
+
+                elif duel_state == "ROUND_INTERMISSION":
+                    state_timer -= dt
+                    if state_timer <= 0.0:
+                        # Advance round and transition to preparation
+                        current_round += 1
+                        poise_blue = 2
+                        poise_red = 2
+                        rally_streak = 0
+                        clash_duration = 0.0
+                        counter_strike_slot = None
+                        counter_strike_expiry = 0.0
+                        duel_state = "ROUND_PREPARATION"
+                        state_timer = config.duel.prep_seconds
+                        active_banner_text = f"ROUND {current_round}/{config.duel.max_rounds} -- STEP TO YOUR SIDES!"
+                        active_banner_color = (0, 255, 255)
+                        active_banner_expiry = curr_time + config.duel.prep_seconds
 
                 # -------------------------------------------------------------
                 # BLADE COLLISION & PARRY COMBAT EVALUATION
@@ -609,8 +645,8 @@ def main() -> None:
                                     active_banner_text = f">>> JEDI GUARD BROKEN! SITH WINS ROUND {current_round}! <<<"
                                     active_banner_color = config.saber.sith_red
                                 active_banner_expiry = curr_time + 2.8
-                                duel_state = "ROUND_OVER"
-                                post_disarm_timer = curr_time + config.duel.post_disarm_cooldown
+                                duel_state = "ROUND_DISARM"
+                                state_timer = config.duel.round_disarm_seconds
 
                             # 4. Handle Rally Streaks and other banners
                             elif is_new_clash:
@@ -643,62 +679,65 @@ def main() -> None:
 
                 particle_system.update(dt)
 
-                # 1. Render physical hilts for active hand grips (with dynamic perspective scaling)
-                for saber in sabers.values():
-                    if (
-                        saber.is_active
-                        and saber.current_hilt_start
-                        and saber.current_hilt_end
-                        and saber.current_direction
-                    ):
-                        render_hilt(
-                            frame,
-                            saber.current_hilt_start,
-                            saber.current_hilt_end,
-                            saber.current_direction,
-                            scale_factor=saber.scale_factor,
-                        )
+                # 1. Render physical hilts for active hand grips (suppressed when match is over)
+                if duel_state != "MATCH_OVER":
+                    for saber in sabers.values():
+                        if (
+                            saber.is_active
+                            and saber.current_hilt_start
+                            and saber.current_hilt_end
+                            and saber.current_direction
+                        ):
+                            render_hilt(
+                                frame,
+                                saber.current_hilt_start,
+                                saber.current_hilt_end,
+                                saber.current_direction,
+                                scale_factor=saber.scale_factor,
+                            )
 
                 # 2. Reusable pre-allocated light canvas (zero-allocation)
                 light_canvas = canvas_buffer.reset_and_get(frame.shape)
 
-                # Render tumbling falling sabers (hilts on frame, blades on light_canvas)
-                for fs in falling_sabers:
-                    fs.draw(frame, light_canvas, curr_time)
+                # Render falling sabers, trails, and luminous blades (suppressed when match is over)
+                if duel_state != "MATCH_OVER":
+                    # Render tumbling falling sabers (hilts on frame, blades on light_canvas)
+                    for fs in falling_sabers:
+                        fs.draw(frame, light_canvas, curr_time)
 
-                # Motion trails
-                if show_trail:
+                    # Motion trails
+                    if show_trail:
+                        for saber in sabers.values():
+                            if len(saber.trail_history) >= 2 and saber.is_active:
+                                draw_trail_on_light_canvas(
+                                    light_canvas,
+                                    saber.trail_history,
+                                    saber.color,
+                                    config.saber.trail_duration,
+                                    curr_time,
+                                )
+
+                    # Luminous blades extending outward from hands (with dynamic perspective scaling)
                     for saber in sabers.values():
-                        if len(saber.trail_history) >= 2 and saber.is_active:
-                            draw_trail_on_light_canvas(
+                        if (
+                            saber.is_active
+                            and saber.current_emitter
+                            and saber.current_endpoint
+                        ):
+                            draw_blade_on_light_canvas(
                                 light_canvas,
-                                saber.trail_history,
+                                saber.current_emitter,
+                                saber.current_endpoint,
                                 saber.color,
-                                config.saber.trail_duration,
-                                curr_time,
+                                curr_time=curr_time,
+                                scale_factor=saber.scale_factor,
                             )
-
-                # Luminous blades extending outward from hands (with dynamic perspective scaling)
-                for saber in sabers.values():
-                    if (
-                        saber.is_active
-                        and saber.current_emitter
-                        and saber.current_endpoint
-                    ):
-                        draw_blade_on_light_canvas(
-                            light_canvas,
-                            saber.current_emitter,
-                            saber.current_endpoint,
-                            saber.color,
-                            curr_time=curr_time,
-                            scale_factor=saber.scale_factor,
-                        )
 
                 # Render Newtonian sparks with thermal color decay
                 particle_system.draw(light_canvas)
 
-                # Render holographic on-screen Ignition Chambers (disappear independently once ignited)
-                if duel_state != "MATCH_OVER":
+                # Render holographic on-screen Ignition Chambers (STRICTLY when awaiting ignition)
+                if duel_state == "AWAITING_IGNITION":
                     if not s_blue.is_ignited:
                         render_side_chamber(
                             frame,
@@ -762,9 +801,16 @@ def main() -> None:
                         poise_hud = f"JEDI GUARD: [ {blue_sh.strip()} ]         SITH GUARD: [ {red_sh.strip()} ]"
                         draw_centered_text(frame, poise_hud, y=60, font_scale=0.55, color=(0, 230, 255), thickness=2)
 
-                    if duel_state == "AWAITING_IGNITION":
+                    if duel_state == "ROUND_PREPARATION":
+                        prep_sec = max(0, int(math.ceil(state_timer)))
+                        status_str = f"STEP TO YOUR SIDES -- CHAMBERS OPEN IN {prep_sec}s"
+                        draw_centered_text(frame, status_str, y=88, font_scale=0.55, color=(0, 255, 255), thickness=2)
+                    elif duel_state == "AWAITING_IGNITION":
                         status_str = f"AWAITING JEDI & SITH IGNITION ({active_saber_count}/2 ACTIVE)"
                         draw_centered_text(frame, status_str, y=88, font_scale=0.52, color=(160, 200, 255), thickness=2)
+                    elif duel_state == "IGNITION_LOCKED":
+                        status_str = ">> BOTH SABERS IGNITED -- ASSUME BATTLE STANCE! <<"
+                        draw_centered_text(frame, status_str, y=88, font_scale=0.56, color=(255, 220, 0), thickness=2)
                     elif duel_state == "COUNTDOWN":
                         sec_num = int(math.ceil(countdown_time_left))
                         cd_text = f"DUEL IN: {sec_num}" if sec_num > 0 else "ENGAGE!"
@@ -798,13 +844,23 @@ def main() -> None:
                                 color=(0, 255, 180),
                                 thickness=2,
                             )
-                    elif duel_state == "ROUND_OVER":
+                    elif duel_state == "ROUND_DISARM":
                         draw_centered_text(
                             frame,
-                            f"ROUND {current_round} OVER - PREPARING NEXT ROUND...",
+                            f"ROUND {current_round} DECIDED -- VICTORY CELEBRATION",
                             y=88,
                             font_scale=0.56,
-                            color=(30, 100, 255),
+                            color=(0, 255, 180),
+                            thickness=2,
+                        )
+                    elif duel_state == "ROUND_INTERMISSION":
+                        inter_sec = max(0, int(math.ceil(state_timer)))
+                        draw_centered_text(
+                            frame,
+                            f"ROUND {current_round} COMPLETE -- NEXT ROUND IN {inter_sec}s",
+                            y=88,
+                            font_scale=0.56,
+                            color=(140, 200, 255),
                             thickness=2,
                         )
 
@@ -887,8 +943,8 @@ def main() -> None:
                         active_banner_text = f"JEDI WINS ROUND {current_round}!"
                         active_banner_color = config.saber.jedi_blue
                         active_banner_expiry = curr_time + 2.8
-                        duel_state = "ROUND_OVER"
-                        post_disarm_timer = curr_time + config.duel.post_disarm_cooldown
+                        duel_state = "ROUND_DISARM"
+                        state_timer = config.duel.round_disarm_seconds
                 elif key in (ord("j"), ord("J")):  # 'j' to disarm Person1 (Jedi Blue) for demo
                     victim = sabers["Person1"]
                     if victim.is_active and duel_state != "MATCH_OVER":
@@ -920,8 +976,8 @@ def main() -> None:
                         active_banner_text = f"SITH WINS ROUND {current_round}!"
                         active_banner_color = config.saber.sith_red
                         active_banner_expiry = curr_time + 2.8
-                        duel_state = "ROUND_OVER"
-                        post_disarm_timer = curr_time + config.duel.post_disarm_cooldown
+                        duel_state = "ROUND_DISARM"
+                        state_timer = config.duel.round_disarm_seconds
                 elif key in (ord("r"), ord("R")):  # 'r' to reset / rematch
                     for saber in sabers.values():
                         saber.reset()
@@ -938,23 +994,26 @@ def main() -> None:
                     counter_strike_slot = None
                     counter_strike_expiry = 0.0
                     match_winner_name = None
-                    duel_state = "AWAITING_IGNITION"
+                    duel_state = "ROUND_PREPARATION"
+                    state_timer = config.duel.prep_seconds
                     countdown_time_left = config.duel.countdown_seconds
-                    active_banner_text = "MATCH RESET - IGNITE SABERS!"
+                    active_banner_text = "MATCH RESET -- STEP TO YOUR SIDES!"
                     active_banner_color = (0, 255, 255)
                     active_banner_expiry = curr_time + 2.0
                 elif key in (ord("s"), ord("S")):  # 's' to skip tutorial
                     if duel_state == "TUTORIAL":
-                        duel_state = "AWAITING_IGNITION"
-                        active_banner_text = "TUTORIAL SKIPPED - IGNITE SABERS!"
+                        duel_state = "ROUND_PREPARATION"
+                        state_timer = config.duel.prep_seconds
+                        active_banner_text = "TUTORIAL SKIPPED -- STEP TO YOUR SIDES!"
                         active_banner_color = (0, 255, 255)
-                        active_banner_expiry = curr_time + 1.8
+                        active_banner_expiry = curr_time + 2.0
                 elif key in (32, 13, ord("n"), ord("N")):  # SPACE / ENTER / 'n' to advance tutorial slide
                     if duel_state == "TUTORIAL":
                         tutorial_slide += 1
                         if tutorial_slide > 3:
-                            duel_state = "AWAITING_IGNITION"
-                            active_banner_text = "BRIEFING COMPLETE - IGNITE SABERS!"
+                            duel_state = "ROUND_PREPARATION"
+                            state_timer = config.duel.prep_seconds
+                            active_banner_text = "PREPARE FOR ROUND 1 -- STEP TO YOUR SIDES!"
                             active_banner_color = (0, 255, 255)
                             active_banner_expiry = curr_time + 2.0
                 elif key in (ord("h"), ord("H")):  # 'h' to open/reopen tutorial cards

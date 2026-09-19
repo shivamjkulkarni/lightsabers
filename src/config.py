@@ -78,8 +78,13 @@ class DualIgnitionBoxConfig:
 @dataclass
 class DuelConfig:
     enable_tutorial: bool = True
-    countdown_seconds: float = 3.0
-    post_disarm_cooldown: float = 3.0
+    prep_seconds: float = 2.0             # Step to designated sides before chambers activate
+    ignition_locked_seconds: float = 1.4  # Pause after both ignite before countdown starts
+    countdown_seconds: float = 3.0        # Duel countdown duration
+    post_disarm_cooldown: float = 3.0     # Cooldown before checking match state
+    round_disarm_seconds: float = 2.8     # Saber tumble & disarm reaction duration
+    intermission_seconds: float = 2.5     # Scoreboard intermission between rounds
+    side_partition_buffer_px: float = 40.0 # Center margin for side-partitioned hand tracking
     max_rounds: int = 3
     wins_to_win: int = 2
     strike_min_speed: float = 340.0

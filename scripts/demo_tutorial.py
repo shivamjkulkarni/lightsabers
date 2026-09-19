@@ -27,33 +27,14 @@ def generate_tutorial_verification_artifact():
 
     for slide_idx in (1, 2, 3):
         frame = np.full((height, width, 3), (16, 18, 24), dtype=np.uint8)
+        # Add subtle sci-fi grid lines on frame
+        for gy in range(0, height, 60):
+            cv2.line(frame, (0, gy), (width, gy), (22, 26, 34), 1)
+        for gx in range(0, width, 60):
+            cv2.line(frame, (gx, 0), (gx, height), (22, 26, 34), 1)
         light_canvas = canvas_buffer.reset_and_get(frame.shape)
 
-        # Draw holographic chambers and demonstration sabers in background
-        render_side_chamber(
-            frame,
-            light_canvas,
-            left_box,
-            title="[ JEDI BLUE CHAMBER ]",
-            prompt="TWO-FINGER FOCUS TO IGNITE",
-            border_color=(255, 180, 50),
-            glow_color=(255, 90, 20),
-            has_hand_inside=False,
-            curr_time=1.0,
-        )
-        render_side_chamber(
-            frame,
-            light_canvas,
-            right_box,
-            title="[ SITH RED CHAMBER ]",
-            prompt="FORCE PUSH / PALM TO IGNITE",
-            border_color=(50, 50, 255),
-            glow_color=(30, 30, 255),
-            has_hand_inside=False,
-            curr_time=1.0,
-        )
-
-        # Draw the tutorial card
+        # Draw the visual tutorial card
         render_tutorial_card(frame, light_canvas, slide_index=slide_idx, curr_time=float(slide_idx))
 
         # Composite light layer
@@ -73,3 +54,4 @@ def generate_tutorial_verification_artifact():
 
 if __name__ == "__main__":
     generate_tutorial_verification_artifact()
+
