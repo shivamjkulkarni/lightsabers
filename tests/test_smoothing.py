@@ -1,9 +1,13 @@
-"""Unit tests for temporal smoothing and saber state management."""
+"""Unit tests for temporal smoothing, saber state management, and hand filtering."""
 
 import math
 import unittest
 
-from src.hand_tracker import HandObservation
+import numpy as np
+
+from src.config import AppConfig
+from src.hand_tracker import HandObservation, filter_one_hand_per_person
+from src.renderer import CanvasBuffer
 from src.saber import SaberInstance
 from src.smoothing import DirectionSmoother, PointSmoother
 
@@ -56,17 +60,17 @@ class TestSmoothing(unittest.TestCase):
         obs = make_test_observation("Right", wrist=(500.0, 500.0))
 
         # Update at t = 0.0
-        saber.update(obs, curr_time=0.0, blade_length=600.0, trail_duration=0.30)
+        saber.update(obs, curr_time=0.0, blade_length=550.0, trail_duration=0.22)
         self.assertTrue(saber.is_active)
         self.assertEqual(len(saber.trail_history), 1)
 
         # Update at t = 0.1
-        saber.update(obs, curr_time=0.1, blade_length=600.0, trail_duration=0.30)
+        saber.update(obs, curr_time=0.1, blade_length=550.0, trail_duration=0.22)
         self.assertEqual(len(saber.trail_history), 2)
 
-        # Update at t = 0.45 (point at t=0.0 and t=0.1 should expire if trail_duration is 0.30)
-        saber.update(obs, curr_time=0.45, blade_length=600.0, trail_duration=0.30)
-        # Only the point from t = 0.45 should remain
+        # Update at t = 0.35 (points at t=0.0 and t=0.1 should expire if trail_duration is 0.22)
+        saber.update(obs, curr_time=0.35, blade_length=550.0, trail_duration=0.22)
+        # Only the point from t = 0.35 should remain
         self.assertEqual(len(saber.trail_history), 1)
 
     def test_saber_instance_grace_period(self):
@@ -83,6 +87,47 @@ class TestSmoothing(unittest.TestCase):
         # Frame dropped at t = 0.3 (exceeds grace period)
         saber.update(None, curr_time=0.3)
         self.assertFalse(saber.is_active)
+
+    def test_filter_one_hand_per_person_same_person(self):
+        # Two hands of the same person: wrists 150px apart, hand size ~80px
+        # threshold is 3.5 * 80 = 280px > 150px -> same person
+        h_left = make_test_observation("Left", wrist=(450.0, 420.0))
+        h_right = make_test_observation("Right", wrist=(550.0, 380.0))  # higher up (y=380 vs 420)
+
+        filtered = filter_one_hand_per_person([h_left, h_right], same_person_max_distance_ratio=3.5)
+        # Should collapse to 1 hand, picking the higher one (h_right)
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0].handedness, "Right")
+
+    def test_filter_one_hand_per_person_two_people(self):
+        # Two distinct people: wrists 700px apart across the screen
+        # threshold is 3.5 * 80 = 280px < 700px -> two people
+        p1 = make_test_observation("Left", wrist=(200.0, 400.0))
+        p2 = make_test_observation("Right", wrist=(950.0, 400.0))
+
+        filtered = filter_one_hand_per_person([p1, p2], same_person_max_distance_ratio=3.5)
+        # Both hands retained
+        self.assertEqual(len(filtered), 2)
+
+    def test_canvas_buffer_zero_allocation(self):
+        buf = CanvasBuffer(1280, 720)
+        arr1 = buf.reset_and_get((720, 1280, 3))
+        self.assertEqual(arr1.shape, (720, 1280, 3))
+        # Modify arr1
+        arr1[0, 0, 0] = 255
+        # Second call returns the same memory buffer cleared
+        arr2 = buf.reset_and_get((720, 1280, 3))
+        self.assertIs(arr1, arr2)
+        self.assertEqual(arr2[0, 0, 0], 0)
+
+    def test_config_values(self):
+        cfg = AppConfig()
+        # 15% reduction from 650px = 550px
+        self.assertEqual(cfg.saber.base_blade_length, 550.0)
+        self.assertEqual(cfg.saber.trail_duration, 0.22)
+        self.assertEqual(cfg.saber.trail_leading_opacity, 0.75)
+        self.assertEqual(cfg.saber.jedi_blue, (255, 90, 20))
+        self.assertEqual(cfg.saber.sith_red, (30, 30, 255))
 
 
 if __name__ == "__main__":

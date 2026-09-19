@@ -14,8 +14,9 @@ import numpy as np
 from src.camera import Camera
 from src.config import AppConfig
 from src.geometry import scale_length_for_resolution
-from src.hand_tracker import HandTracker, draw_hand_landmarks
+from src.hand_tracker import HandTracker, draw_hand_landmarks, filter_one_hand_per_person
 from src.renderer import (
+    CanvasBuffer,
     composite_light_layer,
     draw_blade_on_light_canvas,
     draw_trail_on_light_canvas,
@@ -46,18 +47,21 @@ def main() -> None:
     show_trail = config.show_trail
     show_debug = config.debug_mode
 
-    # Independent sabers for left and right hands
+    # Pre-allocated canvas buffer to eliminate memory allocations and GC latency
+    canvas_buffer = CanvasBuffer(config.camera.width, config.camera.height)
+
+    # Saber slots: Person 1 (Jedi Blue) and Person 2 (Sith Red)
     sabers = {
-        "Left": SaberInstance(
-            handedness="Left",
-            color=config.saber.left_color,
+        "Person1": SaberInstance(
+            handedness="Person1",
+            color=config.saber.jedi_blue,
             alpha_pivot=config.saber.alpha_pivot,
             alpha_direction=config.saber.alpha_direction,
             grace_period=config.saber.grace_period,
         ),
-        "Right": SaberInstance(
-            handedness="Right",
-            color=config.saber.right_color,
+        "Person2": SaberInstance(
+            handedness="Person2",
+            color=config.saber.sith_red,
             alpha_pivot=config.saber.alpha_pivot,
             alpha_direction=config.saber.alpha_direction,
             grace_period=config.saber.grace_period,
@@ -96,30 +100,51 @@ def main() -> None:
                 prev_time = curr_time
 
                 # Detect hands
-                observations = tracker.detect(frame)
+                raw_observations = tracker.detect(frame)
 
-                # Match detected hands to sabers by handedness
-                matched_obs = {}
-                unassigned = []
-                for obs in observations:
-                    if obs.handedness in sabers and obs.handedness not in matched_obs:
-                        matched_obs[obs.handedness] = obs
-                    else:
-                        unassigned.append(obs)
+                # Filter so strictly one hand per person is tracked
+                observations = filter_one_hand_per_person(
+                    raw_observations,
+                    same_person_max_distance_ratio=config.tracker.same_person_max_distance_ratio,
+                )
 
-                # Assign any unassigned hand observation to free saber slot
-                for hand_key in ("Left", "Right"):
-                    if hand_key not in matched_obs and unassigned:
-                        matched_obs[hand_key] = unassigned.pop(0)
-
-                # Update each saber instance
-                for hand_key, saber in sabers.items():
-                    saber.update(
-                        matched_obs.get(hand_key),
+                # Map observations to saber slots (Person 1 = Blue, Person 2 = Red)
+                if len(observations) == 1:
+                    sabers["Person1"].update(
+                        observations[0],
                         curr_time=curr_time,
                         blade_length=blade_length,
                         trail_duration=config.saber.trail_duration,
                     )
+                    sabers["Person2"].update(
+                        None,
+                        curr_time=curr_time,
+                        blade_length=blade_length,
+                        trail_duration=config.saber.trail_duration,
+                    )
+                elif len(observations) >= 2:
+                    # Two distinct people in frame: sort left-to-right
+                    obs_sorted = sorted(observations, key=lambda o: o.wrist[0])
+                    sabers["Person1"].update(
+                        obs_sorted[0],
+                        curr_time=curr_time,
+                        blade_length=blade_length,
+                        trail_duration=config.saber.trail_duration,
+                    )
+                    sabers["Person2"].update(
+                        obs_sorted[1],
+                        curr_time=curr_time,
+                        blade_length=blade_length,
+                        trail_duration=config.saber.trail_duration,
+                    )
+                else:
+                    for saber in sabers.values():
+                        saber.update(
+                            None,
+                            curr_time=curr_time,
+                            blade_length=blade_length,
+                            trail_duration=config.saber.trail_duration,
+                        )
 
                 # 1. Render physical hilts inside hand grips
                 for saber in sabers.values():
@@ -136,10 +161,10 @@ def main() -> None:
                             saber.current_direction,
                         )
 
-                # 2. Render all luminous elements on a unified light layer
-                light_canvas = np.zeros_like(frame)
+                # 2. Reusable pre-allocated light canvas (zero-allocation)
+                light_canvas = canvas_buffer.reset_and_get(frame.shape)
 
-                # Motion trails
+                # Motion trails (faster fade, 20% lower opacity)
                 if show_trail:
                     for saber in sabers.values():
                         if len(saber.trail_history) >= 2:
@@ -171,13 +196,11 @@ def main() -> None:
 
                 # 4. Optional Debug Overlay
                 if show_debug:
-                    draw_hand_landmarks(frame, observations)
+                    draw_hand_landmarks(frame, raw_observations)
                     active_sabers = [k for k, s in sabers.items() if s.is_active]
                     status_text = (
-                        f"FPS: {fps:.1f} | Hands: {len(observations)} | "
-                        f"Sabers: {', '.join(active_sabers) or 'None'} | "
-                        f"Glow: {'ON' if show_glow else 'OFF'} | "
-                        f"Trail: {'ON' if show_trail else 'OFF'}"
+                        f"FPS: {fps:.1f} | Raw Hands: {len(raw_observations)} | "
+                        f"Filtered: {len(observations)} | Active: {', '.join(active_sabers) or 'None'}"
                     )
                     cv2.putText(
                         frame,

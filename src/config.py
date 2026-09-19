@@ -22,21 +22,28 @@ class TrackerConfig:
     min_detection_confidence: float = 0.5
     min_presence_confidence: float = 0.5
     min_tracking_confidence: float = 0.5
+    same_person_max_distance_ratio: float = 3.5
 
 
 @dataclass
 class SaberVisualConfig:
-    base_blade_length: float = 650.0
+    base_blade_length: float = 550.0  # Reduced by 15% from 650px
     reference_height: float = 720.0
-    trail_duration: float = 0.38  # seconds
-    hilt_length: float = 60.0
+    trail_duration: float = 0.22  # Fast fade (down from 0.38s)
+    trail_leading_opacity: float = 0.75  # Reduced by 20% from 0.95
+    trail_decay_exponent: float = 1.35  # Steeper exponential dropoff
+    hilt_length: float = 55.0
     alpha_pivot: float = 0.65
     alpha_direction: float = 0.60
-    grace_period: float = 0.25  # seconds before lost hand disappears
+    grace_period: float = 0.20  # seconds before lost hand disappears
 
-    # BGR colors
-    left_color: Tuple[int, int, int] = (255, 120, 30)   # Jedi Guardian Blue/Cyan
-    right_color: Tuple[int, int, int] = (30, 255, 120)  # Jedi Consular Emerald Green
+    # Traditional Star Wars BGR colors
+    jedi_blue: Tuple[int, int, int] = (255, 90, 20)   # Iconic Jedi Blue
+    sith_red: Tuple[int, int, int] = (30, 30, 255)    # Iconic Sith Crimson Red
+
+    # Aliases for dual slots
+    left_color: Tuple[int, int, int] = (255, 90, 20)   # Slot 1: Jedi Blue
+    right_color: Tuple[int, int, int] = (30, 30, 255)  # Slot 2: Sith Red
 
 
 @dataclass
@@ -49,4 +56,3 @@ class AppConfig:
     show_glow: bool = True
     show_trail: bool = True
     debug_mode: bool = False
-

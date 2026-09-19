@@ -119,7 +119,8 @@ def draw_trail_on_light_canvas(
 
         age = curr_time - t1
         norm_age = max(0.0, min(1.0, age / trail_duration))
-        alpha = (1.0 - norm_age) ** 0.70
+        # Steeper exponent makes trail fade significantly faster
+        alpha = (1.0 - norm_age) ** 1.35
 
         poly = np.array([
             [int(p1_start[0]), int(p1_start[1])],
@@ -128,34 +129,34 @@ def draw_trail_on_light_canvas(
             [int(p2_start[0]), int(p2_start[1])],
         ], dtype=np.int32)
 
-        # Vivid trail color
+        # 20% reduced max opacity (0.75 instead of 0.95)
         seg_color = (
-            min(255, int(color[0] * alpha * 0.95)),
-            min(255, int(color[1] * alpha * 0.95)),
-            min(255, int(color[2] * alpha * 0.95)),
+            min(255, int(color[0] * alpha * 0.75)),
+            min(255, int(color[1] * alpha * 0.75)),
+            min(255, int(color[2] * alpha * 0.75)),
         )
         cv2.fillPoly(light_canvas, [poly], seg_color)
 
         # Historical blade stroke
         blade_alpha_color = (
-            min(255, int(color[0] * alpha * 0.8)),
-            min(255, int(color[1] * alpha * 0.8)),
-            min(255, int(color[2] * alpha * 0.8)),
+            min(255, int(color[0] * alpha * 0.65)),
+            min(255, int(color[1] * alpha * 0.65)),
+            min(255, int(color[2] * alpha * 0.65)),
         )
         cv2.line(
             light_canvas,
             (int(p1_start[0]), int(p1_start[1])),
             (int(p1_end[0]), int(p1_end[1])),
             blade_alpha_color,
-            max(1, int(4 * alpha)),
+            max(1, int(3 * alpha)),
             cv2.LINE_AA,
         )
 
         # White-hot trailing arc along blade tip's path
         pt1 = (int(p1_end[0]), int(p1_end[1]))
         pt2 = (int(p2_end[0]), int(p2_end[1]))
-        white_val = min(255, int(255 * alpha))
-        cv2.line(light_canvas, pt1, pt2, (white_val, white_val, white_val), max(1, int(3 * alpha)), cv2.LINE_AA)
+        white_val = min(255, int(210 * alpha))
+        cv2.line(light_canvas, pt1, pt2, (white_val, white_val, white_val), max(1, int(2 * alpha)), cv2.LINE_AA)
 
 
 def composite_light_layer(
@@ -175,8 +176,8 @@ def composite_light_layer(
         glow_h = h // 2
         small_light = cv2.resize(light_canvas, (glow_w, glow_h), interpolation=cv2.INTER_AREA)
 
-        # Wide soft optical haze
-        blurred = cv2.GaussianBlur(small_light, (29, 29), 0)
+        # Fast 21x21 Gaussian blur for low latency soft haze
+        blurred = cv2.GaussianBlur(small_light, (21, 21), 0)
         bloom = cv2.resize(blurred, (w, h), interpolation=cv2.INTER_LINEAR)
 
         # Add bloom into light layer
@@ -184,6 +185,24 @@ def composite_light_layer(
 
     # Saturating addition directly onto the frame
     cv2.add(frame, light_canvas, dst=frame)
+
+
+class CanvasBuffer:
+    """Reusable pre-allocated light canvas buffer to eliminate GC and allocation latency."""
+
+    def __init__(self, width: int = 1280, height: int = 720) -> None:
+        self.width = width
+        self.height = height
+        self.canvas = np.zeros((height, width, 3), dtype=np.uint8)
+
+    def reset_and_get(self, shape: Tuple[int, ...]) -> np.ndarray:
+        """Return zeroed canvas matching target frame dimensions."""
+        h, w = shape[:2]
+        if self.canvas.shape[0] != h or self.canvas.shape[1] != w:
+            self.canvas = np.zeros((h, w, 3), dtype=np.uint8)
+        else:
+            self.canvas.fill(0)
+        return self.canvas
 
 
 def render_blade(

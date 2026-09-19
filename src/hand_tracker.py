@@ -1,5 +1,6 @@
 """Hand tracking using MediaPipe Tasks Python Hand Landmarker API."""
 
+import math
 import os
 import pathlib
 import time
@@ -190,3 +191,45 @@ def draw_hand_landmarks(frame: np.ndarray, observations: List[HandObservation]) 
             2,
             cv2.LINE_AA,
         )
+
+
+def filter_one_hand_per_person(
+    observations: List[HandObservation],
+    same_person_max_distance_ratio: float = 3.5,
+) -> List[HandObservation]:
+    """
+    Ensure only one hand per person is tracked.
+    
+    If two detected hands belong to the same person (wrists within typical arm span),
+    suppress the secondary hand and keep only the primary dominant hand.
+    If hands are far apart (distinct people in frame), returns both.
+    """
+    if len(observations) <= 1:
+        return observations
+
+    h1, h2 = observations[0], observations[1]
+    wrist_dist = math.hypot(h1.wrist[0] - h2.wrist[0], h1.wrist[1] - h2.wrist[1])
+
+    size1 = math.hypot(
+        h1.knuckles_center[0] - h1.wrist[0], h1.knuckles_center[1] - h1.wrist[1]
+    )
+    size2 = math.hypot(
+        h2.knuckles_center[0] - h2.wrist[0], h2.knuckles_center[1] - h2.wrist[1]
+    )
+    avg_size = max(10.0, (size1 + size2) * 0.5)
+
+    # Distance threshold representing arm-span of a single person in frame
+    threshold = same_person_max_distance_ratio * avg_size
+
+    if wrist_dist < threshold:
+        # Same person: pick the dominant hand (prefer hand held higher in frame)
+        y_diff = h1.wrist[1] - h2.wrist[1]
+        if abs(y_diff) > 25.0:
+            dominant = h1 if y_diff < 0 else h2
+        else:
+            # Roughly level: prefer Right hand, else first
+            dominant = h1 if h1.handedness == "Right" else h2
+        return [dominant]
+
+    # Distant hands = two distinct people in frame
+    return observations

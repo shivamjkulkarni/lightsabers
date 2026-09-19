@@ -33,6 +33,8 @@ class Camera:
 
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        # Minimize buffer size to eliminate camera latency/queue lag
+        self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
     def read(self) -> Optional[np.ndarray]:
         """Read and return a frame from the camera, or None if read fails."""
