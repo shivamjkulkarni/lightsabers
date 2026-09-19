@@ -1,6 +1,6 @@
 # Jedi Lightsabers — Real-Time Computer-Vision
 
-A real-time computer-vision application that turns detected hands into glowing Jedi-style lightsabers with gesture ignition, dynamic distance scaling, blade recoil physics, spark showers, and competitive duel parry combat.
+A real-time computer-vision application that turns detected hands into glowing Jedi-style lightsabers with gesture ignition in dual chambers, 3-round competitive duel matches, dynamic distance scaling, spark showers, parry combat, and persistent winner victory screens.
 
 ```
                      ┌──────────────────┐
@@ -19,7 +19,7 @@ A real-time computer-vision application that turns detected hands into glowing J
                               │
                               ▼
                      ┌──────────────────┐
-                     │ Gesture Ignition │ (Two-Finger Blue / Force Push Red)
+                     │ Dual Chambers    │ (Left Jedi Blue / Right Sith Red)
                      └────────┬─────────┘
                               │
                               ▼
@@ -29,7 +29,7 @@ A real-time computer-vision application that turns detected hands into glowing J
                               │
                               ▼
                      ┌──────────────────┐
-                     │ Combat & Recoil  │ (Parry/disarm logic, harmonic recoil)
+                     │ Combat & Parries │ (Parry/disarm logic, 3-round match)
                      └────────┬─────────┘
                               │
                               ▼
@@ -47,28 +47,36 @@ A real-time computer-vision application that turns detected hands into glowing J
 
 ## Features
 
-- **Gesture-Based Ignition & Hand Binding**:
-  - **Jedi Blue**: Two-Finger Focus Pose (index and middle fingers extended toward the camera, ring and pinky curled into palm).
-  - **Sith Red**: Force Push Pose (open palm facing camera with all fingers extended and spread).
-  - **Direct Hand Binding**: Whichever hand performs the gesture is bound to that lightsaber with a smooth plasma ignition animation.
-- **Calibrated 3D Perspective Scaling**:
-  - Dynamic scaling based on hand distance relative to reference hand span.
-  - Blade length, plasma core thickness, multi-layer bloom flare, and hilt radius scale proportionally to preserve 3D perspective without bloating into thick sausages.
-- **Pre-Duel Countdown & Readiness Gate**:
-  - 3-second animated on-screen countdown (`"DUEL IN: 3... 2... 1... ENGAGE!"`) initiates when two combatants ready their sabers.
+- **Dual Independent Ignition Chambers & Spatial Segregation**:
+  - **Left Chamber**: Dedicated exclusively to Jedi Blue. Place your hand inside the left holographic box and form a **Two-Finger Focus Pose**.
+  - **Right Chamber**: Dedicated exclusively to Sith Red. Place your hand inside the right holographic box and form a **Force Push Pose**.
+  - **Independent Chamber Removal**: Each chamber disappears from the screen as soon as its respective lightsaber ignites.
+- **3-Round Match System (Best-of-3)**:
+  - Matches are contested over up to 3 rounds (first to 2 round wins).
+  - Real-time scoreboard tracked at the top of the HUD: `ROUND 1/3   [ JEDI BLUE: 0  |  SITH RED: 0 ]`.
+  - **Mandatory Fresh Re-Ignition Every Round**: When a round concludes via disarm, both sabers extinguish, and combatants must place their hands back into their respective chambers and re-form their poses to begin the next round.
+- **Persistent Match Winner Screen**:
+  - When a combatant secures 2 round wins, a persistent victory screen appears over a frosted dark backdrop.
+  - Displays the victor banner (`*** JEDI BLUE WINS THE MATCH! ***`), final score, and remains on screen indefinitely until an explicit user input is received.
+  - Press **`R`** to start a fresh rematch, or **`Q`** / **`ESC`** to quit.
+- **Rock-Solid Winning Saber & Recoil Elimination**:
+  - Oscillation recoil flutter has been completely eliminated so the winning saber remains constant and stable.
+- **Pre-Duel Countdown**:
+  - 3-second animated on-screen countdown (`"DUEL IN: 3... 2... 1... ENGAGE!"`) initiates once both combatants have ignited their sabers.
   - Disarms remain locked during countdown so fighters can spar without early knockouts.
-- **Strict Two-Person Limit with Spatial Hysteresis**:
-  - Strictly at most 2 lightsabers on screen, each assigned to a different person.
-  - If 1 person raises two hands, only their dominant hand holds a saber.
-  - Spatial hysteresis prevents combatants from merging into a single entity when crossing blades close together.
 - **Parry Combat & Disarm Mechanics**:
   - High-speed strikes evaluate defender leverage and blade angle.
   - Blocking with the **forte** (lower 72% of the blade) at a crossing angle $\ge 30^\circ$ executes a successful **Parry** (`"PARRIED!"`).
   - Strikers hitting the weak **foible** (tip) or slipping past poor angles trigger a **Missed Parry Disarm** (`"DISARMED! (MISSED PARRY: WEAK TIP)"`).
 - **Floor-Bouncing Disarm Physics**:
   - When disarmed, the saber tumbles along a parabolic arc under gravity ($950\text{px/s}^2$), bounces off the floor with restitution and friction, emits ground sparks, and retracts into the hilt before re-arming.
-- **Elastic Blade Recoil Physics**:
-  - Damped harmonic oscillator (`omega=38.0`, `zeta=0.75`) providing tactile spring recoil deflection when blades clash.
+- **Calibrated 3D Perspective Scaling**:
+  - Dynamic scaling based on hand distance relative to reference hand span.
+  - Blade length, plasma core thickness, multi-layer bloom flare, and hilt radius scale proportionally to preserve 3D perspective without bloating into thick sausages.
+- **Strict Two-Person Limit with Spatial Hysteresis**:
+  - Strictly at most 2 lightsabers on screen, each assigned to a different person.
+  - If 1 person raises two hands, only their dominant hand holds a saber.
+  - Spatial hysteresis prevents combatants from merging into a single entity when crossing blades close together.
 - **Newtonian Spark Particle Physics**:
   - High-velocity sparks spray along contact planes with gravity ($850\text{px/s}^2$), air drag, thermal color decay (white-hot $\to$ electric yellow $\to$ amber $\to$ cooling red embers), and motion streak rendering.
 - **Procedural Luminous Blade**:
@@ -176,20 +184,24 @@ python -m src.main
 
 ---
 
-## How to Play
+## Gameplay & Match Rules
 
-1. **Ignite Blue Lightsaber (Jedi)**:
-   - Hold up your hand facing the camera in a **Two-Finger Focus Pose** (index and middle fingers extended straight up/forward, ring and pinky curled into your palm).
-   - Hold for ~0.15s to ignite.
-2. **Ignite Red Lightsaber (Sith)**:
-   - Hold up your hand facing the camera in an **Open Palm Force Push** (all 4 fingers extended and spread forward).
-   - Hold for ~0.15s to ignite.
-3. **Duel Countdown**:
-   - When two combatants ignite their sabers, a 3-second countdown (`3... 2... 1... ENGAGE!`) will appear on screen.
+1. **Ignite Jedi Blue (Left Chamber)**:
+   - Place your hand within the **Left Holographic Box** on screen.
+   - Form a **Two-Finger Focus Pose** (index and middle fingers extended straight toward camera, ring and pinky curled into palm).
+   - Once ignited, the Left chamber disappears.
+2. **Ignite Sith Red (Right Chamber)**:
+   - Place your hand within the **Right Holographic Box** on screen.
+   - Form an **Open Palm Force Push** (all fingers extended and spread forward toward camera).
+   - Once ignited, the Right chamber disappears.
+3. **Pre-Duel Countdown**:
+   - Once both sabers are ignited, the countdown begins (`3... 2... 1... ENGAGE!`).
 4. **Parrying & Clashing**:
-   - Swing your blade into your opponent's blade.
-   - **Successful Parry**: Intercept your opponent's attack with the lower 70% (forte) of your blade at an angle $\ge 30^\circ$.
-   - **Disarm**: If you get struck on the weak tip (foible) of your blade or slip past parallel, you will be disarmed! Your saber will fly out of your hand, bounce on the floor with sparks, and retract.
+   - Attack with velocity. The defender must parry with their forte (lower blade) at $\ge 30^\circ$ to deflect attacks.
+   - If a parry is missed (hit on the weak foible tip or slipped), the defender is disarmed!
+5. **Round Progression & Victory**:
+   - The victor receives a point. Both sabers extinguish, and players must re-enter their chambers to ignite for the next round.
+   - First combatant to win 2 rounds wins the match! A persistent winner screen displays until **`R`** (rematch) or **`Q`** (quit) is pressed.
 
 ---
 
@@ -198,12 +210,13 @@ python -m src.main
 | Key | Action |
 |:---|:---|
 | **`Q`** / **`ESC`** | Quit application cleanly |
+| **`R`** | Rematch / Reset match, scores, and duel state |
 | **`G`** | Toggle soft luminous bloom/glow effect |
 | **`T`** | Toggle motion trails |
 | **`D`** | Toggle debug HUD (landmarks, skeleton, tracking state) |
 | **`C`** | Spawn test clash sparks at screen center |
-| **`K`** | Test disarm trigger on Person 2 |
-| **`R`** | Reset duel countdown, smoother, and particle physics |
+| **`K`** | Demo disarm Person 2 (Sith Red) -> Awards round win to Jedi |
+| **`J`** | Demo disarm Person 1 (Jedi Blue) -> Awards round win to Sith |
 
 ---
 
@@ -216,10 +229,10 @@ Run the full automated test suite without requiring a camera or GUI window:
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-All **38 unit tests** execute in under 0.01 seconds across:
-- `test_gestures.py`: Two-finger focus pose, force push recognition, fist rejection, and debounce state machine.
-- `test_duel_mechanics.py`: Distance scaling calibration, single-person filter, clash proximity hysteresis, and parry/disarm combat rules.
-- `test_collision.py`: Line intersection math, harmonic recoil oscillator, spark dynamics, and floor bounce physics.
+All **44 unit tests** execute in under 0.01 seconds across:
+- `test_duel_mechanics.py`: 3-round match scoring, round saber extinction, dual chamber isolation, winner screen rendering, distance scaling, and parry combat rules.
+- `test_gestures.py`: Two-finger focus pose, force push recognition, box containment checks, and temporal debounce.
+- `test_collision.py`: Line intersection math, spark dynamics, and floor bounce physics.
 - `test_geometry.py`: Vector normalization, saber angles, endpoint projection, and arm extension.
 - `test_smoothing.py`: Exponential moving average (EMA) filters and canvas buffer reuse.
 
@@ -235,6 +248,8 @@ lightsabers/
 │   ├── demo_collision_physics.py   # Simulation visual generator for collision & disarm
 │   ├── demo_duel_mechanics.py      # Simulation visual generator for duel countdown & parries
 │   ├── demo_gesture_and_scaling.py # Simulation visual generator for gestures & 3D scaling
+│   ├── demo_ignition_box.py        # Simulation visual generator for ignition chamber
+│   ├── demo_match_system.py        # Simulation visual generator for 3-round match system
 │   └── download_model.py           # Cross-platform model asset downloader
 ├── src/
 │   ├── __init__.py
@@ -247,15 +262,15 @@ lightsabers/
 │   ├── hand_tracker.py             # MediaPipe HandLandmarker + TwoPersonTracker spatial hysteresis
 │   ├── main.py                     # Application entry point, duel state machine, HUD & event loop
 │   ├── particles.py                # Newtonian spark particle system with thermal color decay
-│   ├── renderer.py                 # Additive bloom, procedural hilt, scaled core layers, trails
+│   ├── renderer.py                 # Additive bloom, procedural hilt, scaled core layers, trails, winner screen
 │   ├── saber.py                    # SaberInstance state, dynamic scaling smoothing, ignition progress
 │   └── smoothing.py                # PointSmoother and DirectionSmoother EMA filters
 ├── tests/
 │   ├── __init__.py
-│   ├── test_collision.py           # Tests for collision, recoil, sparks, and falling saber
-│   ├── test_duel_mechanics.py      # Tests for distance scaling, two-person tracker & parry rules
+│   ├── test_collision.py           # Tests for collision, sparks, and falling saber
+│   ├── test_duel_mechanics.py      # Tests for match scoring, dual chambers, winner screen, scaling & parries
 │   ├── test_geometry.py            # Tests for vector math, scaling ratios, and geometry
-│   ├── test_gestures.py            # Tests for Two-Finger pose, Force Push pose, and debounce
+│   ├── test_gestures.py            # Tests for Two-Finger pose, Force Push pose, box containment, debounce
 │   └── test_smoothing.py           # Tests for EMA filters, single-hand filter, canvas buffer
 ├── requirements.txt                # Dependencies (mediapipe, opencv-python, numpy)
 └── README.md

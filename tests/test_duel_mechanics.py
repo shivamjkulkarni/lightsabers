@@ -171,6 +171,84 @@ class TestDuelMechanics(unittest.TestCase):
         self.assertIn("SLIPPED", res.banner_text or "")
 
 
+    def test_dual_ignition_chambers_boundary_isolation(self) -> None:
+        """Verify left and right ignition chambers are spatially isolated."""
+        from src.gestures import is_hand_in_box
+        from src.config import DualIgnitionBoxConfig
+
+        box_cfg = DualIgnitionBoxConfig()
+        frame_w, frame_h = 1000, 1000
+        left_box = (
+            int(box_cfg.left_x_min * frame_w),
+            int(box_cfg.left_y_min * frame_h),
+            int(box_cfg.left_x_max * frame_w),
+            int(box_cfg.left_y_max * frame_h),
+        )
+        right_box = (
+            int(box_cfg.right_x_min * frame_w),
+            int(box_cfg.right_y_min * frame_h),
+            int(box_cfg.right_x_max * frame_w),
+            int(box_cfg.right_y_max * frame_h),
+        )
+
+        # Hand on the left side (x = 200, y = 450)
+        left_hand_wrist = (200.0, 450.0)
+        left_hand_knuckles = (200.0, 400.0)
+        self.assertTrue(is_hand_in_box(left_hand_wrist, left_hand_knuckles, left_box))
+        self.assertFalse(is_hand_in_box(left_hand_wrist, left_hand_knuckles, right_box))
+
+        # Hand on the right side (x = 800, y = 450)
+        right_hand_wrist = (800.0, 450.0)
+        right_hand_knuckles = (800.0, 400.0)
+        self.assertFalse(is_hand_in_box(right_hand_wrist, right_hand_knuckles, left_box))
+        self.assertTrue(is_hand_in_box(right_hand_wrist, right_hand_knuckles, right_box))
+
+        # Hand in the center neutral zone (x = 500, y = 450)
+        center_wrist = (500.0, 450.0)
+        center_knuckles = (500.0, 400.0)
+        self.assertFalse(is_hand_in_box(center_wrist, center_knuckles, left_box))
+        self.assertFalse(is_hand_in_box(center_wrist, center_knuckles, right_box))
+
+    def test_saber_reset_between_rounds(self) -> None:
+        """Verify saber reset extinguishes blades and clears ignition state for next round."""
+        from src.saber import SaberInstance
+        saber = SaberInstance(handedness="Right", color=(255, 140, 0))
+        saber.ignite()
+        saber.assigned_wrist_pos = (200.0, 400.0)
+        self.assertTrue(saber.is_ignited)
+        self.assertIsNotNone(saber.assigned_wrist_pos)
+
+        # Extinguish for next round
+        saber.reset()
+        self.assertFalse(saber.is_ignited)
+        self.assertIsNone(saber.assigned_wrist_pos)
+        self.assertFalse(saber.is_active)
+        self.assertFalse(saber.is_disarmed)
+
+    def test_match_winner_screen_rendering(self) -> None:
+        """Smoke test verifying render_match_winner_screen renders onto frame and light canvas."""
+        import numpy as np
+        from src.renderer import render_match_winner_screen
+
+        frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+        light_canvas = np.zeros((720, 1280, 3), dtype=np.uint8)
+
+        render_match_winner_screen(
+            frame=frame,
+            light_canvas=light_canvas,
+            winner_name="Jedi Blue",
+            winner_color=(255, 140, 0),
+            score_blue=2,
+            score_red=1,
+            curr_time=1.0,
+        )
+
+        # Verify pixels were drawn
+        self.assertGreater(int(frame.sum()), 0)
+        self.assertGreater(int(light_canvas.sum()), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
+
 

@@ -241,101 +241,155 @@ def render_trail(
     composite_light_layer(frame, light, show_glow=show_glow)
 
 
-def render_ignition_box(
+def render_side_chamber(
     frame: np.ndarray,
     light_canvas: np.ndarray,
     box_rect: Tuple[int, int, int, int],
+    title: str,
+    prompt: str,
+    border_color: Tuple[int, int, int],
+    glow_color: Tuple[int, int, int],
     has_hand_inside: bool,
-    detected_gesture: Optional[str],
-    is_blue_ignited: bool,
-    is_red_ignited: bool,
     curr_time: float,
 ) -> None:
     """
-    Draw a stylized sci-fi holographic Ignition Chamber / Box.
-    
-    If both sabers are already ignited, gracefully dims the box.
-    Highlights when a hand is present, and flares in Electric Blue or Sith Crimson
-    when an ignition gesture is performed.
+    Draw a stylized sci-fi holographic Ignition Chamber on either the Left or Right side.
     """
     bx1, by1, bx2, by2 = box_rect
     box_w = bx2 - bx1
     box_h = by2 - by1
 
-    # Completely remove/hide ignition chamber after both sabers are ignited
-    if is_blue_ignited and is_red_ignited:
-        return
+    active_border = border_color
+    active_glow = glow_color
 
-    # Determine state color
-    if detected_gesture == "JediBlue":
-        border_color = (255, 140, 0)  # Neon Cyan/Blue
-        glow_color = (255, 180, 50)
-    elif detected_gesture == "SithRed":
-        border_color = (30, 40, 255)  # Crimson Red
-        glow_color = (80, 80, 255)
-    elif has_hand_inside:
+    if has_hand_inside:
         pulse = 0.5 + 0.5 * math.sin(curr_time * 8.0)
         c_val = int(200 + 55 * pulse)
-        border_color = (c_val, c_val, c_val)
-        glow_color = (255, 220, 100)
-    else:
-        border_color = (0, 215, 255)  # Idle Holocron amber
-        glow_color = (0, 140, 200)
+        active_border = (c_val, c_val, c_val)
+        active_glow = (255, 255, 255)
 
     # Base border
-    dim_mult = 0.4
     dim_color = (
-        int(border_color[0] * dim_mult),
-        int(border_color[1] * dim_mult),
-        int(border_color[2] * dim_mult),
+        int(active_border[0] * 0.35),
+        int(active_border[1] * 0.35),
+        int(active_border[2] * 0.35),
     )
     cv2.rectangle(frame, (bx1, by1), (bx2, by2), dim_color, 1, cv2.LINE_AA)
 
     # Corner brackets
-    corner_len = min(40, box_w // 5, box_h // 5)
+    corner_len = min(36, box_w // 5, box_h // 5)
     thickness = 2 if not has_hand_inside else 3
 
     # Top-Left
-    cv2.line(frame, (bx1, by1), (bx1 + corner_len, by1), border_color, thickness, cv2.LINE_AA)
-    cv2.line(frame, (bx1, by1), (bx1, by1 + corner_len), border_color, thickness, cv2.LINE_AA)
+    cv2.line(frame, (bx1, by1), (bx1 + corner_len, by1), active_border, thickness, cv2.LINE_AA)
+    cv2.line(frame, (bx1, by1), (bx1, by1 + corner_len), active_border, thickness, cv2.LINE_AA)
     # Top-Right
-    cv2.line(frame, (bx2, by1), (bx2 - corner_len, by1), border_color, thickness, cv2.LINE_AA)
-    cv2.line(frame, (bx2, by1), (bx2, by1 + corner_len), border_color, thickness, cv2.LINE_AA)
+    cv2.line(frame, (bx2, by1), (bx2 - corner_len, by1), active_border, thickness, cv2.LINE_AA)
+    cv2.line(frame, (bx2, by1), (bx2, by1 + corner_len), active_border, thickness, cv2.LINE_AA)
     # Bottom-Left
-    cv2.line(frame, (bx1, by2), (bx1 + corner_len, by2), border_color, thickness, cv2.LINE_AA)
-    cv2.line(frame, (bx1, by2), (bx1, by2 - corner_len), border_color, thickness, cv2.LINE_AA)
+    cv2.line(frame, (bx1, by2), (bx1 + corner_len, by2), active_border, thickness, cv2.LINE_AA)
+    cv2.line(frame, (bx1, by2), (bx1, by2 - corner_len), active_border, thickness, cv2.LINE_AA)
     # Bottom-Right
-    cv2.line(frame, (bx2, by2), (bx2 - corner_len, by2), border_color, thickness, cv2.LINE_AA)
+    cv2.line(frame, (bx2, by2), (bx2 - corner_len, by2), active_border, thickness, cv2.LINE_AA)
     cv2.line(frame, (bx2, by2), (bx2, by2 - corner_len), border_color, thickness, cv2.LINE_AA)
 
-    # Soft glowing bloom on light_canvas for the brackets
-    cv2.line(light_canvas, (bx1, by1), (bx1 + corner_len, by1), glow_color, thickness + 3, cv2.LINE_AA)
-    cv2.line(light_canvas, (bx1, by1), (bx1, by1 + corner_len), glow_color, thickness + 3, cv2.LINE_AA)
-    cv2.line(light_canvas, (bx2, by1), (bx2 - corner_len, by1), glow_color, thickness + 3, cv2.LINE_AA)
-    cv2.line(light_canvas, (bx2, by1), (bx2, by1 + corner_len), glow_color, thickness + 3, cv2.LINE_AA)
-    cv2.line(light_canvas, (bx1, by2), (bx1 + corner_len, by2), glow_color, thickness + 3, cv2.LINE_AA)
-    cv2.line(light_canvas, (bx1, by2), (bx1, by2 - corner_len), glow_color, thickness + 3, cv2.LINE_AA)
-    cv2.line(light_canvas, (bx2, by2), (bx2 - corner_len, by2), glow_color, thickness + 3, cv2.LINE_AA)
-    cv2.line(light_canvas, (bx2, by2), (bx2, by2 - corner_len), glow_color, thickness + 3, cv2.LINE_AA)
+    # Glowing bloom on light_canvas
+    cv2.line(light_canvas, (bx1, by1), (bx1 + corner_len, by1), active_glow, thickness + 3, cv2.LINE_AA)
+    cv2.line(light_canvas, (bx1, by1), (bx1, by1 + corner_len), active_glow, thickness + 3, cv2.LINE_AA)
+    cv2.line(light_canvas, (bx2, by1), (bx2 - corner_len, by1), active_glow, thickness + 3, cv2.LINE_AA)
+    cv2.line(light_canvas, (bx2, by1), (bx2, by1 + corner_len), active_glow, thickness + 3, cv2.LINE_AA)
+    cv2.line(light_canvas, (bx1, by2), (bx1 + corner_len, by2), active_glow, thickness + 3, cv2.LINE_AA)
+    cv2.line(light_canvas, (bx1, by2), (bx1, by2 - corner_len), active_glow, thickness + 3, cv2.LINE_AA)
+    cv2.line(light_canvas, (bx2, by2), (bx2 - corner_len, by2), active_glow, thickness + 3, cv2.LINE_AA)
+    cv2.line(light_canvas, (bx2, by2), (bx2, by2 - corner_len), active_glow, thickness + 3, cv2.LINE_AA)
 
-    # Top Header Label Badge
-    title = "[ IGNITION CHAMBER ]"
-    (tw, _), _ = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+    # Header title
+    (tw, _), _ = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.52, 2)
     tx = bx1 + (box_w - tw) // 2
-    ty = max(25, by1 - 12)
-    cv2.putText(frame, title, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 4, cv2.LINE_AA)
-    cv2.putText(frame, title, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.55, border_color, 2, cv2.LINE_AA)
+    ty = max(22, by1 - 10)
+    cv2.putText(frame, title, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (0, 0, 0), 4, cv2.LINE_AA)
+    cv2.putText(frame, title, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.52, active_border, 2, cv2.LINE_AA)
 
-    # Contextual prompt below box
-    if has_hand_inside:
-        sub = "FORM POSE: 2 FINGERS (BLUE) | FORCE PUSH (RED)"
-        sub_color = (0, 255, 255)
-    else:
-        sub = "PLACE HAND IN BOX TO IGNITE"
-        sub_color = (180, 220, 255)
-
-    (sw, _), _ = cv2.getTextSize(sub, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+    # Contextual prompt below
+    sub = prompt if not has_hand_inside else "HAND DETECTED - FORM POSE!"
+    sub_color = (0, 255, 255) if has_hand_inside else (200, 200, 200)
+    (sw, _), _ = cv2.getTextSize(sub, cv2.FONT_HERSHEY_SIMPLEX, 0.42, 1)
     sx = bx1 + (box_w - sw) // 2
-    sy = by2 + 25
-    cv2.putText(frame, sub, (sx, sy), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 3, cv2.LINE_AA)
-    cv2.putText(frame, sub, (sx, sy), cv2.FONT_HERSHEY_SIMPLEX, 0.45, sub_color, 1, cv2.LINE_AA)
+    sy = by2 + 24
+    cv2.putText(frame, sub, (sx, sy), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 0, 0), 3, cv2.LINE_AA)
+    cv2.putText(frame, sub, (sx, sy), cv2.FONT_HERSHEY_SIMPLEX, 0.42, sub_color, 1, cv2.LINE_AA)
+
+
+def render_match_winner_screen(
+    frame: np.ndarray,
+    light_canvas: np.ndarray,
+    winner_name: str,
+    winner_color: Tuple[int, int, int],
+    score_blue: int,
+    score_red: int,
+    curr_time: float,
+) -> None:
+    """
+    Render a dramatic, persistent Victory Screen when a 3-round match concludes.
+    Stays on screen until user presses 'R' to rematch or 'Q' to quit.
+    """
+    h, w = frame.shape[:2]
+
+    # Dark translucent backdrop overlay
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (0, 0), (w, h), (10, 10, 15), -1)
+    cv2.addWeighted(overlay, 0.78, frame, 0.22, 0, frame)
+
+    # Frosted center card
+    cw, ch = int(w * 0.80), int(h * 0.62)
+    cx1 = (w - cw) // 2
+    cy1 = (h - ch) // 2
+    cx2 = cx1 + cw
+    cy2 = cy1 + ch
+
+    scale = max(0.48, min(1.1, w / 1280.0))
+
+    cv2.rectangle(frame, (cx1, cy1), (cx2, cy2), (25, 25, 35), -1)
+    cv2.rectangle(frame, (cx1, cy1), (cx2, cy2), winner_color, max(2, int(3 * scale)), cv2.LINE_AA)
+    cv2.rectangle(light_canvas, (cx1, cy1), (cx2, cy2), winner_color, max(3, int(6 * scale)), cv2.LINE_AA)
+
+    # 1. Victory Title (ASCII-safe for OpenCV)
+    title = f"*** {winner_name.upper()} WINS THE MATCH! ***"
+    t_scale = 0.85 * scale
+    t_thick = max(2, int(3 * scale))
+    (tw, th), _ = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, t_scale, t_thick)
+    tx = (w - tw) // 2
+    ty = cy1 + int(ch * 0.28)
+    cv2.putText(frame, title, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, t_scale, (0, 0, 0), t_thick + 3, cv2.LINE_AA)
+    cv2.putText(frame, title, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, t_scale, winner_color, t_thick, cv2.LINE_AA)
+    cv2.putText(light_canvas, title, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, t_scale, (255, 255, 255), t_thick, cv2.LINE_AA)
+
+    # 2. Final Scoreboard
+    score_text = f"FINAL SCORE:  JEDI BLUE  {score_blue}  -  {score_red}  SITH RED"
+    s_scale = 0.68 * scale
+    s_thick = max(1, int(2 * scale))
+    (sw, sh), _ = cv2.getTextSize(score_text, cv2.FONT_HERSHEY_SIMPLEX, s_scale, s_thick)
+    sx = (w - sw) // 2
+    sy = cy1 + int(ch * 0.52)
+    cv2.putText(frame, score_text, (sx, sy), cv2.FONT_HERSHEY_SIMPLEX, s_scale, (0, 0, 0), s_thick + 3, cv2.LINE_AA)
+    cv2.putText(frame, score_text, (sx, sy), cv2.FONT_HERSHEY_SIMPLEX, s_scale, (0, 240, 255), s_thick, cv2.LINE_AA)
+
+    # 3. Match format subtitle
+    sub_text = "BEST OF 3 ROUNDS COMPLETED"
+    m_scale = 0.45 * scale
+    (mw, mh), _ = cv2.getTextSize(sub_text, cv2.FONT_HERSHEY_SIMPLEX, m_scale, 1)
+    mx = (w - mw) // 2
+    my = cy1 + int(ch * 0.68)
+    cv2.putText(frame, sub_text, (mx, my), cv2.FONT_HERSHEY_SIMPLEX, m_scale, (180, 180, 180), 1, cv2.LINE_AA)
+
+    # 4. Pulsing Rematch / Quit prompt
+    pulse = 0.5 + 0.5 * math.sin(curr_time * 5.0)
+    prompt_color = (int(160 + 95 * pulse), 255, int(160 + 95 * pulse))
+    prompt = "PRESS  [R]  FOR REMATCH   |   PRESS  [Q]  OR  [ESC]  TO QUIT"
+    p_scale = 0.52 * scale
+    p_thick = max(1, int(2 * scale))
+    (pw, ph), _ = cv2.getTextSize(prompt, cv2.FONT_HERSHEY_SIMPLEX, p_scale, p_thick)
+    px = (w - pw) // 2
+    py = cy2 - int(ch * 0.12)
+    cv2.putText(frame, prompt, (px, py), cv2.FONT_HERSHEY_SIMPLEX, p_scale, (0, 0, 0), p_thick + 3, cv2.LINE_AA)
+    cv2.putText(frame, prompt, (px, py), cv2.FONT_HERSHEY_SIMPLEX, p_scale, prompt_color, p_thick, cv2.LINE_AA)

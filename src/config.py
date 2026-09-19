@@ -53,25 +53,34 @@ class SaberVisualConfig:
 
 
 @dataclass
-class IgnitionBoxConfig:
-    """Configuration for the on-screen Ignition Box / Holocron Chamber."""
+class DualIgnitionBoxConfig:
+    """Configuration for separate Left and Right on-screen Ignition Chambers."""
     enabled: bool = True
-    # Normalized coordinates (0.0 to 1.0)
-    x_min: float = 0.32
-    y_min: float = 0.15
-    x_max: float = 0.68
-    y_max: float = 0.65
-    # Visual stylings (BGR)
-    idle_color: Tuple[int, int, int] = (0, 215, 255)         # Neon Amber / Holocron Gold
-    hand_inside_color: Tuple[int, int, int] = (255, 255, 255) # Bright White
-    blue_glow: Tuple[int, int, int] = (255, 140, 0)          # Electric Blue
-    red_glow: Tuple[int, int, int] = (30, 40, 255)           # Sith Red
+    # Left box (Jedi Blue) in normalized coordinates (0.0 to 1.0)
+    left_x_min: float = 0.06
+    left_y_min: float = 0.20
+    left_x_max: float = 0.40
+    left_y_max: float = 0.70
+
+    # Right box (Sith Red) in normalized coordinates (0.0 to 1.0)
+    right_x_min: float = 0.60
+    right_y_min: float = 0.20
+    right_x_max: float = 0.94
+    right_y_max: float = 0.70
+
+    # Styling colors (BGR)
+    blue_idle: Tuple[int, int, int] = (255, 140, 0)
+    blue_glow: Tuple[int, int, int] = (255, 180, 50)
+    red_idle: Tuple[int, int, int] = (30, 40, 255)
+    red_glow: Tuple[int, int, int] = (80, 80, 255)
 
 
 @dataclass
 class DuelConfig:
     countdown_seconds: float = 3.0
-    post_disarm_cooldown: float = 2.5
+    post_disarm_cooldown: float = 3.0
+    max_rounds: int = 3
+    wins_to_win: int = 2
     strike_min_speed: float = 340.0
     strike_speed_ratio: float = 1.7
     parry_min_angle_deg: float = 30.0
@@ -85,7 +94,7 @@ class AppConfig:
     camera: CameraConfig = field(default_factory=CameraConfig)
     tracker: TrackerConfig = field(default_factory=TrackerConfig)
     saber: SaberVisualConfig = field(default_factory=SaberVisualConfig)
-    box: IgnitionBoxConfig = field(default_factory=IgnitionBoxConfig)
+    box: DualIgnitionBoxConfig = field(default_factory=DualIgnitionBoxConfig)
     duel: DuelConfig = field(default_factory=DuelConfig)
 
     # Runtime toggles
