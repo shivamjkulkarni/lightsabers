@@ -8,6 +8,20 @@ from src.saber import SaberInstance
 from src.smoothing import DirectionSmoother, PointSmoother
 
 
+def make_test_observation(handedness: str, wrist=(500.0, 500.0)) -> HandObservation:
+    knuckles = (wrist[0], wrist[1] - 80.0)
+    return HandObservation(
+        handedness=handedness,
+        landmarks=[(0.0, 0.0)] * 21,
+        wrist=wrist,
+        index_mcp=(wrist[0] - 20.0, wrist[1] - 80.0),
+        index_tip=(wrist[0] - 20.0, wrist[1] - 140.0),
+        middle_mcp=(wrist[0], wrist[1] - 85.0),
+        knuckles_center=knuckles,
+        palm_center=(wrist[0], wrist[1] - 40.0),
+    )
+
+
 class TestSmoothing(unittest.TestCase):
 
     def test_point_smoother(self):
@@ -39,37 +53,25 @@ class TestSmoothing(unittest.TestCase):
 
     def test_saber_instance_trail_and_expiration(self):
         saber = SaberInstance(handedness="Right", grace_period=0.20)
-        obs = HandObservation(
-            handedness="Right",
-            landmarks=[(0.0, 0.0)] * 21,
-            wrist=(500.0, 500.0),
-            index_mcp=(500.0, 450.0),
-            index_tip=(500.0, 400.0),
-        )
+        obs = make_test_observation("Right", wrist=(500.0, 500.0))
 
         # Update at t = 0.0
-        saber.update(obs, curr_time=0.0, blade_length=300.0, trail_duration=0.30)
+        saber.update(obs, curr_time=0.0, blade_length=600.0, trail_duration=0.30)
         self.assertTrue(saber.is_active)
         self.assertEqual(len(saber.trail_history), 1)
 
         # Update at t = 0.1
-        saber.update(obs, curr_time=0.1, blade_length=300.0, trail_duration=0.30)
+        saber.update(obs, curr_time=0.1, blade_length=600.0, trail_duration=0.30)
         self.assertEqual(len(saber.trail_history), 2)
 
         # Update at t = 0.45 (point at t=0.0 and t=0.1 should expire if trail_duration is 0.30)
-        saber.update(obs, curr_time=0.45, blade_length=300.0, trail_duration=0.30)
+        saber.update(obs, curr_time=0.45, blade_length=600.0, trail_duration=0.30)
         # Only the point from t = 0.45 should remain
         self.assertEqual(len(saber.trail_history), 1)
 
     def test_saber_instance_grace_period(self):
         saber = SaberInstance(handedness="Left", grace_period=0.20)
-        obs = HandObservation(
-            handedness="Left",
-            landmarks=[(0.0, 0.0)] * 21,
-            wrist=(200.0, 300.0),
-            index_mcp=(200.0, 250.0),
-            index_tip=(200.0, 200.0),
-        )
+        obs = make_test_observation("Left", wrist=(200.0, 300.0))
 
         saber.update(obs, curr_time=0.0)
         self.assertTrue(saber.is_active)

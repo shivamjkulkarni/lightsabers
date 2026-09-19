@@ -49,3 +49,4 @@ class DirectionSmoother:
     def reset(self) -> None:
         """Reset smoother state."""
         self._current = None
+

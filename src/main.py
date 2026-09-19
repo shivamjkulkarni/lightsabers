@@ -10,11 +10,17 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import cv2
+import numpy as np
 from src.camera import Camera
 from src.config import AppConfig
 from src.geometry import scale_length_for_resolution
 from src.hand_tracker import HandTracker, draw_hand_landmarks
-from src.renderer import render_blade, render_hilt, render_trail
+from src.renderer import (
+    composite_light_layer,
+    draw_blade_on_light_canvas,
+    draw_trail_on_light_canvas,
+    render_hilt,
+)
 from src.saber import SaberInstance
 
 
@@ -115,41 +121,55 @@ def main() -> None:
                         trail_duration=config.saber.trail_duration,
                     )
 
-                # 1. Render motion trails for all sabers
+                # 1. Render physical hilts inside hand grips
+                for saber in sabers.values():
+                    if (
+                        saber.is_active
+                        and saber.current_hilt_start
+                        and saber.current_hilt_end
+                        and saber.current_direction
+                    ):
+                        render_hilt(
+                            frame,
+                            saber.current_hilt_start,
+                            saber.current_hilt_end,
+                            saber.current_direction,
+                        )
+
+                # 2. Render all luminous elements on a unified light layer
+                light_canvas = np.zeros_like(frame)
+
+                # Motion trails
                 if show_trail:
                     for saber in sabers.values():
                         if len(saber.trail_history) >= 2:
-                            render_trail(
-                                frame,
+                            draw_trail_on_light_canvas(
+                                light_canvas,
                                 saber.trail_history,
                                 saber.color,
                                 config.saber.trail_duration,
                                 curr_time,
                             )
 
-                # 2. Render hilts and luminous blades for active sabers
+                # Luminous blades extending outward from hands
                 for saber in sabers.values():
                     if (
                         saber.is_active
-                        and saber.current_pivot
+                        and saber.current_emitter
                         and saber.current_endpoint
-                        and saber.current_direction
                     ):
-                        render_hilt(
-                            frame,
-                            saber.current_pivot,
-                            saber.current_direction,
-                            hilt_length=config.saber.hilt_length,
-                        )
-                        render_blade(
-                            frame,
-                            saber.current_pivot,
+                        draw_blade_on_light_canvas(
+                            light_canvas,
+                            saber.current_emitter,
                             saber.current_endpoint,
                             saber.color,
-                            show_glow=show_glow,
+                            curr_time=curr_time,
                         )
 
-                # 3. Optional Debug Overlay
+                # 3. Additive bloom and compositing with saturating addition
+                composite_light_layer(frame, light_canvas, show_glow=show_glow)
+
+                # 4. Optional Debug Overlay
                 if show_debug:
                     draw_hand_landmarks(frame, observations)
                     active_sabers = [k for k, s in sabers.items() if s.is_active]

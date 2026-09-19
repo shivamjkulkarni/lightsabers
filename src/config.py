@@ -26,10 +26,10 @@ class TrackerConfig:
 
 @dataclass
 class SaberVisualConfig:
-    base_blade_length: float = 320.0
+    base_blade_length: float = 650.0
     reference_height: float = 720.0
-    trail_duration: float = 0.35  # seconds
-    hilt_length: float = 50.0
+    trail_duration: float = 0.38  # seconds
+    hilt_length: float = 60.0
     alpha_pivot: float = 0.65
     alpha_direction: float = 0.60
     grace_period: float = 0.25  # seconds before lost hand disappears
@@ -49,3 +49,4 @@ class AppConfig:
     show_glow: bool = True
     show_trail: bool = True
     debug_mode: bool = False
+

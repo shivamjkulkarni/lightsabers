@@ -78,11 +78,54 @@ def calculate_saber_endpoint(
     )
 
 
-def is_saber_active(hand_observation: Any) -> bool:
+def calculate_arm_extended_geometry(
+    wrist: Point2D,
+    knuckles_center: Point2D,
+    index_tip: Point2D,
+    blade_length: float = 650.0,
+) -> Tuple[Point2D, Point2D, Point2D, Point2D, Vector2D]:
     """
-    Gesture activation hook for lightsaber.
+    Calculate lightsaber geometry extending outward from the arm/hand into space.
     
-    Currently activates on any valid hand observation.
-    Future hack-night upgrades can evaluate finger extension / fists.
+    Returns:
+        emitter: Point where the luminous blade starts (just past knuckles/hand)
+        endpoint: Tip of the lightsaber blade
+        hilt_start: Base of hilt (near wrist)
+        hilt_end: Emitter collar of hilt (at knuckles)
+        direction: Unit vector pointing along the arm outward into space
     """
+    # Vector along forearm through hand
+    arm_v = (knuckles_center[0] - wrist[0], knuckles_center[1] - wrist[1])
+    hand_len = distance(wrist, knuckles_center)
+    if hand_len < 5.0:
+        hand_len = 50.0
+
+    # Combine arm axis (70%) and finger direction (30%)
+    tip_v = (index_tip[0] - wrist[0], index_tip[1] - wrist[1])
+    combined_dir = normalize((
+        0.70 * arm_v[0] + 0.30 * tip_v[0],
+        0.70 * arm_v[1] + 0.30 * tip_v[1],
+    ))
+
+    # Hilt rests in the hand between wrist and knuckles
+    hilt_start = wrist
+    hilt_end = (
+        knuckles_center[0] + combined_dir[0] * (hand_len * 0.20),
+        knuckles_center[1] + combined_dir[1] * (hand_len * 0.20),
+    )
+
+    # Blade emitter begins at the front of the hand/hilt, extending outward
+    emitter = hilt_end
+
+    # Endpoint extends into open space
+    endpoint = (
+        emitter[0] + combined_dir[0] * blade_length,
+        emitter[1] + combined_dir[1] * blade_length,
+    )
+
+    return emitter, endpoint, hilt_start, hilt_end, combined_dir
+
+
+def is_saber_active(hand_observation: Any) -> bool:
+    """Gesture activation hook for lightsaber."""
     return hand_observation is not None

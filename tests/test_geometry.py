@@ -5,6 +5,7 @@ import unittest
 
 from src.geometry import (
     angle,
+    calculate_arm_extended_geometry,
     calculate_saber_direction,
     calculate_saber_endpoint,
     distance,
@@ -62,6 +63,23 @@ class TestGeometry(unittest.TestCase):
         endpoint = calculate_saber_endpoint(pivot, direction, blade_length)
         self.assertAlmostEqual(endpoint[0], 450.0)
         self.assertAlmostEqual(endpoint[1], 300.0)
+
+    def test_calculate_arm_extended_geometry(self):
+        wrist = (500.0, 500.0)
+        knuckles = (500.0, 400.0)  # Arm pointing up (-y)
+        tip = (500.0, 350.0)
+        emitter, endpoint, hstart, hend, direction = calculate_arm_extended_geometry(
+            wrist, knuckles, tip, blade_length=600.0
+        )
+        # Direction should be pointing straight up
+        self.assertAlmostEqual(direction[0], 0.0)
+        self.assertAlmostEqual(direction[1], -1.0)
+        # Emitter should be beyond knuckles in direction of arm (y < 400.0)
+        self.assertLess(emitter[1], knuckles[1])
+        # Endpoint should be 600px beyond emitter
+        self.assertAlmostEqual(emitter[1] - endpoint[1], 600.0)
+        # Hilt starts at wrist
+        self.assertEqual(hstart, wrist)
 
     def test_scale_length_for_resolution(self):
         # Default 720p reference

@@ -3,7 +3,13 @@
 import collections
 from typing import Deque, Optional, Tuple
 
-from src.geometry import calculate_saber_direction, calculate_saber_endpoint, Point2D, Vector2D
+from src.geometry import (
+    calculate_arm_extended_geometry,
+    calculate_saber_direction,
+    calculate_saber_endpoint,
+    Point2D,
+    Vector2D,
+)
 from src.hand_tracker import HandObservation
 from src.smoothing import DirectionSmoother, PointSmoother
 
@@ -25,12 +31,15 @@ class SaberInstance:
         self.color = color
         self.grace_period = grace_period
 
-        self.pivot_smoother = PointSmoother(alpha=alpha_pivot)
+        self.emitter_smoother = PointSmoother(alpha=alpha_pivot)
+        self.hilt_start_smoother = PointSmoother(alpha=alpha_pivot)
         self.direction_smoother = DirectionSmoother(alpha=alpha_direction)
         self.trail_history: Deque[TrailPoint] = collections.deque()
 
-        self.current_pivot: Optional[Point2D] = None
+        self.current_emitter: Optional[Point2D] = None
         self.current_endpoint: Optional[Point2D] = None
+        self.current_hilt_start: Optional[Point2D] = None
+        self.current_hilt_end: Optional[Point2D] = None
         self.current_direction: Optional[Vector2D] = None
         self.last_seen_time: float = 0.0
         self.is_active: bool = False
@@ -39,31 +48,53 @@ class SaberInstance:
         self,
         observation: Optional[HandObservation],
         curr_time: float,
-        blade_length: float = 320.0,
-        trail_duration: float = 0.35,
+        blade_length: float = 650.0,
+        trail_duration: float = 0.38,
     ) -> None:
-        """Update saber state from an optional hand observation and expire old trail points."""
+        """Update saber state from hand observation and expire old trail points."""
         if observation is not None:
-            smooth_pivot = self.pivot_smoother.update(observation.wrist)
-            raw_dir = calculate_saber_direction(
-                observation.wrist, observation.index_mcp, observation.index_tip
-            )
-            smooth_dir = self.direction_smoother.update(raw_dir)
-            endpoint = calculate_saber_endpoint(smooth_pivot, smooth_dir, blade_length)
+            # Use arm-extended geometry if knuckles landmark is available
+            if hasattr(observation, "knuckles_center"):
+                raw_emitter, _, raw_hstart, raw_hend, raw_dir = calculate_arm_extended_geometry(
+                    observation.wrist,
+                    observation.knuckles_center,
+                    observation.index_tip,
+                    blade_length=blade_length,
+                )
+            else:
+                raw_hstart = observation.wrist
+                raw_dir = calculate_saber_direction(
+                    observation.wrist, observation.index_mcp, observation.index_tip
+                )
+                raw_emitter = observation.index_mcp
+                raw_hend = raw_emitter
 
-            self.current_pivot = smooth_pivot
-            self.current_endpoint = endpoint
+            # Temporal smoothing
+            smooth_emitter = self.emitter_smoother.update(raw_emitter)
+            smooth_hstart = self.hilt_start_smoother.update(raw_hstart)
+            smooth_dir = self.direction_smoother.update(raw_dir)
+
+            smooth_endpoint = (
+                smooth_emitter[0] + smooth_dir[0] * blade_length,
+                smooth_emitter[1] + smooth_dir[1] * blade_length,
+            )
+
+            self.current_emitter = smooth_emitter
+            self.current_endpoint = smooth_endpoint
+            self.current_hilt_start = smooth_hstart
+            self.current_hilt_end = smooth_emitter
             self.current_direction = smooth_dir
             self.last_seen_time = curr_time
             self.is_active = True
 
-            # Append to trail history
-            self.trail_history.append((smooth_pivot, endpoint, curr_time))
+            # Append to trail history: (emitter, endpoint, timestamp)
+            self.trail_history.append((smooth_emitter, smooth_endpoint, curr_time))
         else:
             # Grace period: keep active briefly so saber doesn't snap off upon single frame drop
             if curr_time - self.last_seen_time > self.grace_period:
                 self.is_active = False
-                self.pivot_smoother.reset()
+                self.emitter_smoother.reset()
+                self.hilt_start_smoother.reset()
                 self.direction_smoother.reset()
 
         # Expire old trail points
@@ -72,11 +103,14 @@ class SaberInstance:
 
     def reset(self) -> None:
         """Clear tracking history and reset state."""
-        self.pivot_smoother.reset()
+        self.emitter_smoother.reset()
+        self.hilt_start_smoother.reset()
         self.direction_smoother.reset()
         self.trail_history.clear()
-        self.current_pivot = None
+        self.current_emitter = None
         self.current_endpoint = None
+        self.current_hilt_start = None
+        self.current_hilt_end = None
         self.current_direction = None
         self.is_active = False
         self.last_seen_time = 0.0

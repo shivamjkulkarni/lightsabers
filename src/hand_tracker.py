@@ -16,6 +16,10 @@ import numpy as np
 WRIST_IDX = 0
 INDEX_MCP_IDX = 5
 INDEX_TIP_IDX = 8
+MIDDLE_MCP_IDX = 9
+MIDDLE_TIP_IDX = 12
+RING_MCP_IDX = 13
+PINKY_MCP_IDX = 17
 
 
 @dataclass
@@ -26,6 +30,9 @@ class HandObservation:
     wrist: Tuple[float, float]
     index_mcp: Tuple[float, float]
     index_tip: Tuple[float, float]
+    middle_mcp: Tuple[float, float]
+    knuckles_center: Tuple[float, float]
+    palm_center: Tuple[float, float]
 
 
 class HandTracker:
@@ -97,6 +104,21 @@ class HandTracker:
             wrist = pixel_landmarks[WRIST_IDX]
             index_mcp = pixel_landmarks[INDEX_MCP_IDX]
             index_tip = pixel_landmarks[INDEX_TIP_IDX]
+            middle_mcp = pixel_landmarks[MIDDLE_MCP_IDX]
+            ring_mcp = pixel_landmarks[RING_MCP_IDX]
+            pinky_mcp = pixel_landmarks[PINKY_MCP_IDX]
+
+            # Center of the 4 knuckles (MCP joints)
+            knuckles_center = (
+                (index_mcp[0] + middle_mcp[0] + ring_mcp[0] + pinky_mcp[0]) * 0.25,
+                (index_mcp[1] + middle_mcp[1] + ring_mcp[1] + pinky_mcp[1]) * 0.25,
+            )
+
+            # Center of the palm (midpoint between wrist and knuckles)
+            palm_center = (
+                (wrist[0] + knuckles_center[0]) * 0.5,
+                (wrist[1] + knuckles_center[1]) * 0.5,
+            )
 
             observations.append(
                 HandObservation(
@@ -105,6 +127,9 @@ class HandTracker:
                     wrist=wrist,
                     index_mcp=index_mcp,
                     index_tip=index_tip,
+                    middle_mcp=middle_mcp,
+                    knuckles_center=knuckles_center,
+                    palm_center=palm_center,
                 )
             )
 
@@ -125,7 +150,6 @@ class HandTracker:
 
 def draw_hand_landmarks(frame: np.ndarray, observations: List[HandObservation]) -> None:
     """Simple debug visualization: draw landmark dots, skeleton lines, and handedness."""
-    # Hand skeleton connections
     CONNECTIONS = [
         (0, 1), (1, 2), (2, 3), (3, 4),        # Thumb
         (0, 5), (5, 6), (6, 7), (7, 8),        # Index
@@ -148,6 +172,10 @@ def draw_hand_landmarks(frame: np.ndarray, observations: List[HandObservation]) 
                 cv2.circle(frame, pt, 5, (0, 200, 255), -1, cv2.LINE_AA)
             else:
                 cv2.circle(frame, pt, 3, (0, 255, 0), -1, cv2.LINE_AA)
+
+        # Draw knuckles center and palm center in debug mode
+        k_pt = (int(obs.knuckles_center[0]), int(obs.knuckles_center[1]))
+        cv2.circle(frame, k_pt, 6, (255, 0, 255), -1, cv2.LINE_AA)
 
         # Label handedness above wrist
         wrist_pt = (int(obs.wrist[0]), int(obs.wrist[1]))
