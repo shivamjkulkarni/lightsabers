@@ -35,6 +35,7 @@ from src.renderer import (
     render_hilt,
     render_match_winner_screen,
     render_side_chamber,
+    render_tutorial_card,
 )
 from src.saber import SaberInstance
 
@@ -67,12 +68,15 @@ def main() -> None:
     print("=" * 65)
     print("Controls:")
     print("  'q' / ESC : Quit")
+    print("  SPACE / N : Next tutorial card")
+    print("  's'       : Skip tutorial")
+    print("  'h'       : Open/reopen tutorial cards")
     print("  'g'       : Toggle glow effect")
     print("  't'       : Toggle motion trail")
     print("  'd'       : Toggle debug landmarks & HUD")
     print("  'c'       : Spawn test clash sparks")
-    print("  'k'       : Knock out / disarm Person 2 (test demo)")
-    print("  'r'       : Reset duel, tracking & physics states")
+    print("  'k' / 'j' : Knock out Sith / Jedi (demo disarm)")
+    print("  'r'       : Reset match & scores")
     print("=" * 65)
     print("Gesture Recognition:")
     print("  Jedi Blue : Two-Finger Focus / Peace sign toward camera")
@@ -119,8 +123,9 @@ def main() -> None:
     particle_system = ParticleSystem(gravity=850.0, drag=0.93)
     falling_sabers: List[FallingSaber] = []
 
-    # Duel state machine: "AWAITING_IGNITION" -> "COUNTDOWN" -> "DUEL_ACTIVE" -> "ROUND_OVER" -> "MATCH_OVER"
-    duel_state = "AWAITING_IGNITION"
+    # Duel state machine: "TUTORIAL" -> "AWAITING_IGNITION" -> "COUNTDOWN" -> "DUEL_ACTIVE" -> "ROUND_OVER" -> "MATCH_OVER"
+    duel_state = "TUTORIAL" if config.duel.enable_tutorial else "AWAITING_IGNITION"
+    tutorial_slide: int = 1
     countdown_time_left = config.duel.countdown_seconds
     current_round: int = 1
     score_blue: int = 0
@@ -720,6 +725,15 @@ def main() -> None:
                             curr_time=curr_time,
                         )
 
+                # Render holographic tutorial briefing cards (Cards 1, 2, 3)
+                if duel_state == "TUTORIAL":
+                    render_tutorial_card(
+                        frame,
+                        light_canvas,
+                        slide_index=tutorial_slide,
+                        curr_time=curr_time,
+                    )
+
                 # Render dramatic victory screen when match is over (stays indefinitely until 'R' or 'Q')
                 if duel_state == "MATCH_OVER":
                     render_match_winner_screen(
@@ -736,7 +750,7 @@ def main() -> None:
                 composite_light_layer(frame, light_canvas, show_glow=show_glow)
 
                 # 4. Duel HUD & Countdown Display
-                if duel_state != "MATCH_OVER":
+                if duel_state not in ("MATCH_OVER", "TUTORIAL"):
                     # Match Scoreboard
                     scoreboard_str = f"ROUND {current_round}/{config.duel.max_rounds}   [ JEDI BLUE: {score_blue}  |  SITH RED: {score_red} ]"
                     draw_centered_text(frame, scoreboard_str, y=32, font_scale=0.65, color=(255, 255, 255), thickness=2)
@@ -929,6 +943,23 @@ def main() -> None:
                     active_banner_text = "MATCH RESET - IGNITE SABERS!"
                     active_banner_color = (0, 255, 255)
                     active_banner_expiry = curr_time + 2.0
+                elif key in (ord("s"), ord("S")):  # 's' to skip tutorial
+                    if duel_state == "TUTORIAL":
+                        duel_state = "AWAITING_IGNITION"
+                        active_banner_text = "TUTORIAL SKIPPED - IGNITE SABERS!"
+                        active_banner_color = (0, 255, 255)
+                        active_banner_expiry = curr_time + 1.8
+                elif key in (32, 13, ord("n"), ord("N")):  # SPACE / ENTER / 'n' to advance tutorial slide
+                    if duel_state == "TUTORIAL":
+                        tutorial_slide += 1
+                        if tutorial_slide > 3:
+                            duel_state = "AWAITING_IGNITION"
+                            active_banner_text = "BRIEFING COMPLETE - IGNITE SABERS!"
+                            active_banner_color = (0, 255, 255)
+                            active_banner_expiry = curr_time + 2.0
+                elif key in (ord("h"), ord("H")):  # 'h' to open/reopen tutorial cards
+                    duel_state = "TUTORIAL"
+                    tutorial_slide = 1
 
     except FileNotFoundError as e:
         print(f"\nConfiguration Error: {e}", file=sys.stderr)

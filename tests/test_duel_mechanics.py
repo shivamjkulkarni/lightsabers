@@ -342,9 +342,25 @@ class TestDuelMechanics(unittest.TestCase):
         self.assertEqual(sorted_obs[0].wrist[0], 320.0)  # Left hand to Blue
         self.assertEqual(sorted_obs[-1].wrist[0], 960.0)  # Right hand to Red
 
+    def test_render_tutorial_cards_all_slides(self) -> None:
+        """Verify render_tutorial_card renders cleanly without exceptions across all slides."""
+        import numpy as np
+        from src.renderer import render_tutorial_card
+
+        frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+        light_canvas = np.zeros((720, 1280, 3), dtype=np.uint8)
+
+        for slide_idx in (1, 2, 3):
+            frame.fill(20)
+            light_canvas.fill(0)
+            render_tutorial_card(frame, light_canvas, slide_index=slide_idx, curr_time=1.0)
+            self.assertGreater(int(frame.sum()), 0)
+            self.assertGreater(int(light_canvas.sum()), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
 

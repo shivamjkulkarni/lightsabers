@@ -47,6 +47,12 @@ A real-time computer-vision application that turns detected hands into glowing J
 
 ## Features
 
+- **Holographic Briefing Tutorial Cards (Skippable)**:
+  - 3 semi-transparent sci-fi briefing cards displayed over the live webcam feed before dueling begins.
+  - **Card 1**: Ignition chambers & distinct hand poses (Two-Finger Focus for Blue, Force Push for Red).
+  - **Card 2**: 2-point Guard Poise system, Solid Forte Blocks, and Guard Shaken staggers.
+  - **Card 3**: Active deflection Perfect Parries, +35% Counter-Strike speed boost, and Disarms.
+  - **Instant Skip**: Press **`S`** at any point to skip straight into combat, **`SPACE`** / **`ENTER`** to advance cards, or **`H`** to reopen.
 - **Dual Independent Ignition Chambers & Spatial Segregation**:
   - **Left Chamber**: Dedicated exclusively to Jedi Blue. Place your hand inside the left holographic box and form a **Two-Finger Focus Pose**.
   - **Right Chamber**: Dedicated exclusively to Sith Red. Place your hand inside the right holographic box and form a **Force Push Pose**.
@@ -221,6 +227,9 @@ python -m src.main
 
 | Key | Action |
 |:---|:---|
+| **`SPACE`** / **`ENTER`** / **`N`** | Advance to next tutorial briefing card |
+| **`S`** | **Skip tutorial** immediately into match |
+| **`H`** | Open / Re-open holographic tutorial briefing cards |
 | **`Q`** / **`ESC`** | Quit application cleanly |
 | **`R`** | Rematch / Reset match, scores, and duel state |
 | **`G`** | Toggle soft luminous bloom/glow effect |

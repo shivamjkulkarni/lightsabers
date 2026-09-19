@@ -77,6 +77,7 @@ class DualIgnitionBoxConfig:
 
 @dataclass
 class DuelConfig:
+    enable_tutorial: bool = True
     countdown_seconds: float = 3.0
     post_disarm_cooldown: float = 3.0
     max_rounds: int = 3

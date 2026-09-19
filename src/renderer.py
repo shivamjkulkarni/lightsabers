@@ -393,3 +393,157 @@ def render_match_winner_screen(
     py = cy2 - int(ch * 0.12)
     cv2.putText(frame, prompt, (px, py), cv2.FONT_HERSHEY_SIMPLEX, p_scale, (0, 0, 0), p_thick + 3, cv2.LINE_AA)
     cv2.putText(frame, prompt, (px, py), cv2.FONT_HERSHEY_SIMPLEX, p_scale, prompt_color, p_thick, cv2.LINE_AA)
+
+
+def render_tutorial_card(
+    frame: np.ndarray,
+    light_canvas: np.ndarray,
+    slide_index: int,
+    curr_time: float,
+) -> None:
+    """
+    Render a sleek, semi-transparent sci-fi holographic briefing card over the live camera feed.
+    
+    Slides:
+      1: Ignition Chambers & Hand Poses
+      2: Guard Poise & Defensive Blocking
+      3: Active Deflection: Perfect Parries, Counter-Strikes & Disarms
+    """
+    h, w = frame.shape[:2]
+    scale = max(0.48, min(1.1, w / 1280.0))
+
+    card_w = int(w * 0.78)
+    card_h = int(h * 0.72)
+    cx1 = (w - card_w) // 2
+    cy1 = (h - card_h) // 2
+    cx2 = cx1 + card_w
+    cy2 = cy1 + card_h
+
+    # 1. Translucent frosted dark backdrop overlay
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (cx1, cy1), (cx2, cy2), (12, 14, 20), -1)
+    cv2.addWeighted(overlay, 0.88, frame, 0.12, 0, frame)
+
+    # 2. Glowing sci-fi border & corner brackets
+    border_color = (255, 190, 40)
+    glow_color = (255, 140, 20)
+    b_thick = max(1, int(2 * scale))
+    cv2.rectangle(frame, (cx1, cy1), (cx2, cy2), border_color, b_thick, cv2.LINE_AA)
+    cv2.rectangle(light_canvas, (cx1, cy1), (cx2, cy2), glow_color, b_thick + 3, cv2.LINE_AA)
+
+    c_len = min(40, int(card_w * 0.06))
+    # Corner brackets on frame and bloom
+    for bx, by, dx, dy in [
+        (cx1, cy1, 1, 1),
+        (cx2, cy1, -1, 1),
+        (cx1, cy2, 1, -1),
+        (cx2, cy2, -1, -1),
+    ]:
+        cv2.line(frame, (bx, by), (bx + dx * c_len, by), (0, 255, 255), b_thick + 2, cv2.LINE_AA)
+        cv2.line(frame, (bx, by), (bx, by + dy * c_len), (0, 255, 255), b_thick + 2, cv2.LINE_AA)
+        cv2.line(light_canvas, (bx, by), (bx + dx * c_len, by), (0, 200, 255), b_thick + 5, cv2.LINE_AA)
+        cv2.line(light_canvas, (bx, by), (bx, by + dy * c_len), (0, 200, 255), b_thick + 5, cv2.LINE_AA)
+
+    # 3. Slide Content Definition
+    slides_data = {
+        1: {
+            "title": "CARD 1/3: IGNITION CHAMBERS & HAND GESTURES",
+            "subtitle": "Independent Spatial Chambers -- Left Jedi & Right Sith",
+            "lines": [
+                ("LEFT CHAMBER", "Jedi Blue  -> Point index & middle fingers forward (Two-Finger Focus)"),
+                ("RIGHT CHAMBER", "Sith Red   -> Open palm facing camera toward screen (Force Push)"),
+                ("SEPARATION", "Chambers are spatially segregated; stand on your respective side."),
+                ("IGNITION", "Each chamber disappears automatically the moment its blade ignites!"),
+            ],
+            "accent": (255, 140, 0),
+        },
+        2: {
+            "title": "CARD 2/3: GUARD POISE & BLADE DEFENSE",
+            "subtitle": "Tactical Resilience -- No Instant 1-Hit Round KOs",
+            "lines": [
+                ("GUARD POISE", "Each fighter starts each round with 2 Guard Points [ + + ]."),
+                ("SOLID FORTE BLOCK", "Block incoming strikes with lower blade (ratio <= 0.72) at >= 30 deg."),
+                ("GUARD SHAKEN", "Weak tip contact or parallel blade slips damage poise by 1 [ + - ]."),
+                ("TACTICAL TIP", "Solid blocks preserve poise! Keep your forte between you and strikes."),
+            ],
+            "accent": (0, 220, 255),
+        },
+        3: {
+            "title": "CARD 3/3: PERFECT PARRIES & VICTORY",
+            "subtitle": "Active Deflection, Counter-Strikes & Decisive Disarms",
+            "lines": [
+                ("PERFECT PARRY", "Actively snap blade INTO incoming strike (speed >= 110 px/s, angle >= 35 deg)."),
+                ("SUPERNOVA BURST", "Triggers 50-spark supernova + plasma shockwave + RESTORES +1 POISE!"),
+                ("COUNTER READY", "Grants 1.2s counter-strike speed advantage (+35% blade speed)."),
+                ("DISARM & WIN", "Breaking opponent's last poise point knocks their saber flying (Best of 3)!"),
+            ],
+            "accent": (0, 255, 180),
+        },
+    }
+
+    slide_info = slides_data.get(slide_index, slides_data[1])
+    accent_color = slide_info["accent"]
+
+    # Header Title
+    t_scale = 0.68 * scale
+    t_thick = max(1, int(2 * scale))
+    (tw, th), _ = cv2.getTextSize(slide_info["title"], cv2.FONT_HERSHEY_SIMPLEX, t_scale, t_thick)
+    tx = (w - tw) // 2
+    ty = cy1 + int(card_h * 0.12)
+    cv2.putText(frame, slide_info["title"], (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, t_scale, (0, 0, 0), t_thick + 3, cv2.LINE_AA)
+    cv2.putText(frame, slide_info["title"], (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, t_scale, accent_color, t_thick, cv2.LINE_AA)
+    cv2.putText(light_canvas, slide_info["title"], (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, t_scale, accent_color, t_thick + 1, cv2.LINE_AA)
+
+    # Subtitle
+    sub_scale = 0.44 * scale
+    (sub_w, _), _ = cv2.getTextSize(slide_info["subtitle"], cv2.FONT_HERSHEY_SIMPLEX, sub_scale, 1)
+    cv2.putText(frame, slide_info["subtitle"], ((w - sub_w) // 2, ty + int(card_h * 0.08)), cv2.FONT_HERSHEY_SIMPLEX, sub_scale, (180, 210, 230), 1, cv2.LINE_AA)
+
+    # Dividing separator line
+    div_y = ty + int(card_h * 0.12)
+    cv2.line(frame, (cx1 + 40, div_y), (cx2 - 40, div_y), (80, 100, 130), 1, cv2.LINE_AA)
+
+    # Content bullets
+    content_y = div_y + int(card_h * 0.11)
+    line_spacing = int(card_h * 0.135)
+    bullet_scale = 0.48 * scale
+    label_scale = 0.48 * scale
+    thick_line = max(1, int(1.5 * scale))
+
+    for idx, (label, desc) in enumerate(slide_info["lines"]):
+        ly = content_y + idx * line_spacing
+        lx = cx1 + int(card_w * 0.06)
+
+        # Label tag
+        label_str = f"[{label}]"
+        (lw, _), _ = cv2.getTextSize(label_str, cv2.FONT_HERSHEY_SIMPLEX, label_scale, 2)
+        cv2.putText(frame, label_str, (lx, ly), cv2.FONT_HERSHEY_SIMPLEX, label_scale, (0, 0, 0), 4, cv2.LINE_AA)
+        cv2.putText(frame, label_str, (lx, ly), cv2.FONT_HERSHEY_SIMPLEX, label_scale, accent_color, 2, cv2.LINE_AA)
+
+        # Description text
+        desc_x = lx + lw + int(18 * scale)
+        cv2.putText(frame, desc, (desc_x, ly), cv2.FONT_HERSHEY_SIMPLEX, bullet_scale, (0, 0, 0), 3, cv2.LINE_AA)
+        cv2.putText(frame, desc, (desc_x, ly), cv2.FONT_HERSHEY_SIMPLEX, bullet_scale, (235, 235, 235), thick_line, cv2.LINE_AA)
+
+    # 4. Slide Pagination Indicator
+    dots_y = cy2 - int(card_h * 0.15)
+    dots_str = f"<<   SLIDE  {slide_index}  OF  3   >>"
+    (dw, _), _ = cv2.getTextSize(dots_str, cv2.FONT_HERSHEY_SIMPLEX, 0.48 * scale, 1)
+    cv2.putText(frame, dots_str, ((w - dw) // 2, dots_y), cv2.FONT_HERSHEY_SIMPLEX, 0.48 * scale, (140, 170, 200), 1, cv2.LINE_AA)
+
+    # 5. Pulsing Nav Prompt
+    pulse = 0.5 + 0.5 * math.sin(curr_time * 5.0)
+    prompt_col = (int(160 + 95 * pulse), 255, int(160 + 95 * pulse))
+
+    if slide_index < 3:
+        nav_text = "PRESS  [SPACE] / [ENTER]  FOR NEXT CARD    |    PRESS  [S]  TO SKIP TUTORIAL"
+    else:
+        nav_text = "PRESS  [SPACE] / [ENTER]  TO COMMENCE DUEL    |    PRESS  [S]  TO SKIP TUTORIAL"
+
+    p_scale = 0.50 * scale
+    p_thick = max(1, int(2 * scale))
+    (nw, _), _ = cv2.getTextSize(nav_text, cv2.FONT_HERSHEY_SIMPLEX, p_scale, p_thick)
+    nx = (w - nw) // 2
+    ny = cy2 - int(card_h * 0.05)
+    cv2.putText(frame, nav_text, (nx, ny), cv2.FONT_HERSHEY_SIMPLEX, p_scale, (0, 0, 0), p_thick + 3, cv2.LINE_AA)
+    cv2.putText(frame, nav_text, (nx, ny), cv2.FONT_HERSHEY_SIMPLEX, p_scale, prompt_col, p_thick, cv2.LINE_AA)
