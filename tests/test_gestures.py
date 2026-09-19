@@ -176,8 +176,64 @@ class TestGestures(unittest.TestCase):
         self.assertFalse(is_hand_in_box(wrist=(1000, 300), knuckles=(1000, 240), box_rect=box_rect))
 
         # Above the box
-        self.assertFalse(is_hand_in_box(wrist=(640, 80), knuckles=(640, 50), box_rect=box_rect))
+        self.assertFalse(is_hand_in_box(wrist=(640, 40), knuckles=(640, 20), box_rect=box_rect))
+
+    def test_is_hand_in_box_with_palm_center(self) -> None:
+        """Verify palm_center allows detection when wrist and knuckles are on the boundary."""
+        box_rect = (400, 120, 880, 480)
+        # Palm center is inside, while knuckles are near top and wrist is near bottom
+        self.assertTrue(
+            is_hand_in_box(
+                wrist=(640, 500),
+                knuckles=(640, 100),
+                box_rect=box_rect,
+                palm_center=(640, 300),
+            )
+        )
+
+    def test_jedi_two_finger_relaxed_curling(self) -> None:
+        """Verify Jedi pose triggers even if ring finger is naturally relaxed rather than clamped."""
+        landmarks = create_hand_landmarks({
+            "index": True,
+            "middle": True,
+            "ring": False,
+            "pinky": False,
+        })
+        # Simulate ring finger slightly relaxed (tip not all the way in MCP)
+        landmarks[16] = (landmarks[13][0], landmarks[13][1] - 25)
+        self.assertTrue(is_two_finger_pose(landmarks))
+        self.assertFalse(is_force_push_pose(landmarks))
+
+    def test_jedi_rejects_single_point_and_horns(self) -> None:
+        """Verify single pointing finger and rock-on/horns gestures are rejected."""
+        # Pointing (only index extended)
+        pointing = create_hand_landmarks({
+            "index": True,
+            "middle": False,
+            "ring": False,
+            "pinky": False,
+        })
+        self.assertFalse(is_two_finger_pose(pointing))
+
+        # Horns / Rock-on (index + pinky extended, middle curled)
+        horns = create_hand_landmarks({
+            "index": True,
+            "middle": False,
+            "ring": False,
+            "pinky": True,
+        })
+        self.assertFalse(is_two_finger_pose(horns))
+
+        # Three fingers (index + middle + ring extended)
+        three_fingers = create_hand_landmarks({
+            "index": True,
+            "middle": True,
+            "ring": True,
+            "pinky": False,
+        })
+        self.assertFalse(is_two_finger_pose(three_fingers))
 
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -204,13 +204,12 @@ def main() -> None:
 
                     # Hand is free to ignite a lightsaber
                     if not is_near_blue and not is_near_red:
-                        lms = obs.landmarks_3d if obs.landmarks_3d else obs.landmarks
-
-                        # 1. Left Chamber -> Two-Finger Pose ignites Jedi Blue
+                        # 1. Left Chamber -> Two-Finger Focus ignites Jedi Blue
                         if not s_blue.is_ignited and not s_blue.is_disarmed:
-                            if is_hand_in_box(obs.wrist, obs.knuckles_center, left_box_rect):
+                            if is_hand_in_box(obs.wrist, obs.knuckles_center, left_box_rect, palm_center=obs.palm_center):
                                 has_hand_in_left = True
-                                if is_two_finger_pose(lms):
+                                is_jedi = is_two_finger_pose(obs.landmarks_3d) or is_two_finger_pose(obs.landmarks)
+                                if is_jedi:
                                     s_blue.ignite()
                                     s_blue.assigned_wrist_pos = obs.wrist
                                     particle_system.spawn_clash_sparks(obs.knuckles_center[0], obs.knuckles_center[1], count=30)
@@ -220,9 +219,10 @@ def main() -> None:
 
                         # 2. Right Chamber -> Force Push ignites Sith Red
                         if not s_red.is_ignited and not s_red.is_disarmed:
-                            if is_hand_in_box(obs.wrist, obs.knuckles_center, right_box_rect):
+                            if is_hand_in_box(obs.wrist, obs.knuckles_center, right_box_rect, palm_center=obs.palm_center):
                                 has_hand_in_right = True
-                                if is_force_push_pose(lms):
+                                is_sith = is_force_push_pose(obs.landmarks_3d) or is_force_push_pose(obs.landmarks)
+                                if is_sith:
                                     s_red.ignite()
                                     s_red.assigned_wrist_pos = obs.wrist
                                     particle_system.spawn_clash_sparks(obs.knuckles_center[0], obs.knuckles_center[1], count=30)
