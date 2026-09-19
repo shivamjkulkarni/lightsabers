@@ -46,8 +46,10 @@ def scale_length_for_resolution(
 
 def calculate_distance_scaled_blade_length(
     hand_size_px: float,
-    hand_to_blade_ratio: float = 7.5,
-    min_length: float = 180.0,
+    hand_to_blade_ratio: float = 5.8,
+    reference_hand_size: float = 95.0,
+    base_length: float = 550.0,
+    min_length: float = 120.0,
     max_length: float = 580.0,
 ) -> float:
     """
@@ -55,8 +57,24 @@ def calculate_distance_scaled_blade_length(
     As a combatant steps back, hand_size_px shrinks, realistically
     scaling down the blade without making it look like an oversized pole.
     """
-    raw_length = hand_size_px * hand_to_blade_ratio
+    if reference_hand_size > 0.0:
+        raw_length = base_length * (hand_size_px / reference_hand_size)
+    else:
+        raw_length = hand_size_px * hand_to_blade_ratio
     return max(min_length, min(max_length, raw_length))
+
+
+def calculate_perspective_scale_factor(
+    hand_size_px: float,
+    reference_hand_size: float = 95.0,
+    min_scale: float = 0.40,
+    max_scale: float = 1.35,
+) -> float:
+    """Calculate normalized perspective scale factor for blade thickness, glow, and hilt."""
+    if reference_hand_size <= 0.0:
+        return 1.0
+    scale = hand_size_px / reference_hand_size
+    return max(min_scale, min(max_scale, scale))
 
 
 def calculate_saber_direction(

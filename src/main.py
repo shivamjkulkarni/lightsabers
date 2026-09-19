@@ -21,7 +21,11 @@ from src.collision import (
 )
 from src.config import AppConfig
 from src.falling_saber import FallingSaber
-from src.geometry import calculate_distance_scaled_blade_length
+from src.geometry import (
+    calculate_distance_scaled_blade_length,
+    calculate_perspective_scale_factor,
+)
+from src.gestures import is_force_push_pose, is_two_finger_pose
 from src.hand_tracker import HandTracker, TwoPersonTracker, draw_hand_landmarks
 from src.particles import ParticleSystem
 from src.renderer import (
@@ -69,6 +73,10 @@ def main() -> None:
     print("  'k'       : Knock out / disarm Person 2 (test demo)")
     print("  'r'       : Reset duel, tracking & physics states")
     print("=" * 65)
+    print("Gesture Recognition:")
+    print("  Jedi Blue : Two-Finger Focus / Peace sign toward camera")
+    print("  Sith Red  : Force Push / Open Palm toward camera")
+    print("=" * 65)
 
     window_name = "Jedi Lightsabers"
     prev_time = time.time()
@@ -94,6 +102,7 @@ def main() -> None:
             alpha_pivot=config.saber.alpha_pivot,
             alpha_direction=config.saber.alpha_direction,
             grace_period=config.saber.grace_period,
+            is_ignited=False,
         ),
         "Person2": SaberInstance(
             handedness="Person2",
@@ -101,6 +110,7 @@ def main() -> None:
             alpha_pivot=config.saber.alpha_pivot,
             alpha_direction=config.saber.alpha_direction,
             grace_period=config.saber.grace_period,
+            is_ignited=False,
         ),
     }
 
@@ -109,8 +119,7 @@ def main() -> None:
     recoil_controller = BladeRecoilController(omega=38.0, zeta=0.75)
     falling_sabers: List[FallingSaber] = []
 
-    # Duel state machine
-    # States: "AWAITING_PLAYERS" -> "COUNTDOWN" -> "DUEL_ACTIVE" -> "ROUND_OVER"
+    # Duel state machine: "AWAITING_PLAYERS" -> "COUNTDOWN" -> "DUEL_ACTIVE" -> "ROUND_OVER"
     duel_state = "AWAITING_PLAYERS"
     countdown_time_left = config.duel.countdown_seconds
     active_banner_text: Optional[str] = None
@@ -152,61 +161,126 @@ def main() -> None:
                 # Filter so at most 2 distinct people are tracked (with spatial hysteresis)
                 observations = person_tracker.update(raw_observations, curr_time)
 
-                # Dynamic distance-based blade scaling computed per hand
-                if len(observations) == 1:
-                    obs = observations[0]
-                    len1 = calculate_distance_scaled_blade_length(
-                        obs.hand_size,
-                        hand_to_blade_ratio=config.saber.hand_to_blade_ratio,
+                # -------------------------------------------------------------
+                # GESTURE RECOGNITION & HAND-TO-SABER BINDING
+                # -------------------------------------------------------------
+                s_blue = sabers["Person1"]
+                s_red = sabers["Person2"]
+
+                # Check unassigned hands for ignition gestures
+                for obs in observations:
+                    is_near_blue = (
+                        s_blue.is_ignited
+                        and s_blue.assigned_wrist_pos is not None
+                        and math.hypot(obs.wrist[0] - s_blue.assigned_wrist_pos[0], obs.wrist[1] - s_blue.assigned_wrist_pos[1]) < 220.0
+                    )
+                    is_near_red = (
+                        s_red.is_ignited
+                        and s_red.assigned_wrist_pos is not None
+                        and math.hypot(obs.wrist[0] - s_red.assigned_wrist_pos[0], obs.wrist[1] - s_red.assigned_wrist_pos[1]) < 220.0
+                    )
+
+                    # Hand is free to ignite a lightsaber
+                    if not is_near_blue and not is_near_red:
+                        # 1. Two-Finger Pose -> Ignites Jedi Blue on THIS hand
+                        if not s_blue.is_ignited and not s_blue.is_disarmed:
+                            if is_two_finger_pose(obs.landmarks):
+                                s_blue.ignite()
+                                s_blue.assigned_wrist_pos = obs.wrist
+                                particle_system.spawn_clash_sparks(obs.knuckles_center[0], obs.knuckles_center[1], count=25)
+                                active_banner_text = "JEDI BLUE IGNITED! (TWO-FINGER POSE)"
+                                active_banner_color = (255, 120, 0)
+                                active_banner_expiry = curr_time + 1.5
+
+                        # 2. Force Push / Open Palm -> Ignites Sith Red on THIS hand
+                        if not s_red.is_ignited and not s_red.is_disarmed:
+                            if is_force_push_pose(obs.landmarks):
+                                s_red.ignite()
+                                s_red.assigned_wrist_pos = obs.wrist
+                                particle_system.spawn_clash_sparks(obs.knuckles_center[0], obs.knuckles_center[1], count=25)
+                                active_banner_text = "SITH RED IGNITED! (FORCE PUSH)"
+                                active_banner_color = (30, 60, 255)
+                                active_banner_expiry = curr_time + 1.5
+
+                # -------------------------------------------------------------
+                # TRACK & UPDATE MATCHING HANDS FOR EACH SABER
+                # -------------------------------------------------------------
+                matched_blue_obs = None
+                matched_red_obs = None
+
+                if s_blue.is_ignited and s_blue.assigned_wrist_pos:
+                    best_dist = 280.0
+                    for obs in observations:
+                        dist = math.hypot(obs.wrist[0] - s_blue.assigned_wrist_pos[0], obs.wrist[1] - s_blue.assigned_wrist_pos[1])
+                        if dist < best_dist:
+                            best_dist = dist
+                            matched_blue_obs = obs
+
+                if s_red.is_ignited and s_red.assigned_wrist_pos:
+                    best_dist = 280.0
+                    for obs in observations:
+                        if obs is matched_blue_obs:
+                            continue
+                        dist = math.hypot(obs.wrist[0] - s_red.assigned_wrist_pos[0], obs.wrist[1] - s_red.assigned_wrist_pos[1])
+                        if dist < best_dist:
+                            best_dist = dist
+                            matched_red_obs = obs
+
+                # Update Blue Saber with dynamic distance scaling
+                if matched_blue_obs is not None:
+                    len_blue = calculate_distance_scaled_blade_length(
+                        matched_blue_obs.hand_size,
+                        base_length=config.saber.base_blade_length,
+                        reference_hand_size=config.saber.reference_hand_size,
                         min_length=config.saber.min_blade_length,
                         max_length=config.saber.max_blade_length,
                     )
-                    sabers["Person1"].update(
-                        obs,
-                        curr_time=curr_time,
-                        blade_length=len1,
-                        trail_duration=config.saber.trail_duration,
+                    scale_blue = calculate_perspective_scale_factor(
+                        matched_blue_obs.hand_size,
+                        reference_hand_size=config.saber.reference_hand_size,
                     )
-                    sabers["Person2"].update(
+                    s_blue.update(
+                        matched_blue_obs,
+                        curr_time=curr_time,
+                        blade_length=len_blue,
+                        trail_duration=config.saber.trail_duration,
+                        scale_factor=scale_blue,
+                    )
+                else:
+                    s_blue.update(
                         None,
                         curr_time=curr_time,
                         blade_length=config.saber.base_blade_length,
                         trail_duration=config.saber.trail_duration,
                     )
-                elif len(observations) >= 2:
-                    obs1, obs2 = observations[0], observations[1]
-                    len1 = calculate_distance_scaled_blade_length(
-                        obs1.hand_size,
-                        hand_to_blade_ratio=config.saber.hand_to_blade_ratio,
+
+                # Update Red Saber with dynamic distance scaling
+                if matched_red_obs is not None:
+                    len_red = calculate_distance_scaled_blade_length(
+                        matched_red_obs.hand_size,
+                        base_length=config.saber.base_blade_length,
+                        reference_hand_size=config.saber.reference_hand_size,
                         min_length=config.saber.min_blade_length,
                         max_length=config.saber.max_blade_length,
                     )
-                    len2 = calculate_distance_scaled_blade_length(
-                        obs2.hand_size,
-                        hand_to_blade_ratio=config.saber.hand_to_blade_ratio,
-                        min_length=config.saber.min_blade_length,
-                        max_length=config.saber.max_blade_length,
+                    scale_red = calculate_perspective_scale_factor(
+                        matched_red_obs.hand_size,
+                        reference_hand_size=config.saber.reference_hand_size,
                     )
-                    sabers["Person1"].update(
-                        obs1,
+                    s_red.update(
+                        matched_red_obs,
                         curr_time=curr_time,
-                        blade_length=len1,
+                        blade_length=len_red,
                         trail_duration=config.saber.trail_duration,
-                    )
-                    sabers["Person2"].update(
-                        obs2,
-                        curr_time=curr_time,
-                        blade_length=len2,
-                        trail_duration=config.saber.trail_duration,
+                        scale_factor=scale_red,
                     )
                 else:
-                    for saber in sabers.values():
-                        saber.update(
-                            None,
-                            curr_time=curr_time,
-                            blade_length=config.saber.base_blade_length,
-                            trail_duration=config.saber.trail_duration,
-                        )
+                    s_red.update(
+                        None,
+                        curr_time=curr_time,
+                        blade_length=config.saber.base_blade_length,
+                        trail_duration=config.saber.trail_duration,
+                    )
 
                 # Update elastic blade recoil physics
                 recoil_controller.update(dt)
@@ -217,8 +291,10 @@ def main() -> None:
                         angle = recoil_controller.get_recoil_angle(slot_name)
                         saber.apply_recoil(angle)
 
-                # Duel state machine updates
-                active_saber_count = sum(1 for s in sabers.values() if s.is_active)
+                # -------------------------------------------------------------
+                # DUEL STATE MACHINE UPDATES
+                # -------------------------------------------------------------
+                active_saber_count = sum(1 for s in sabers.values() if s.is_active and s.is_ignited)
 
                 if duel_state == "AWAITING_PLAYERS":
                     if active_saber_count == 2:
@@ -226,7 +302,7 @@ def main() -> None:
                         countdown_time_left = config.duel.countdown_seconds
                 elif duel_state == "COUNTDOWN":
                     if active_saber_count < 2:
-                        # Fighter lowered hand during countdown
+                        # Combatant lowered hand or extinguished blade
                         duel_state = "AWAITING_PLAYERS"
                     else:
                         countdown_time_left -= dt
@@ -238,31 +314,31 @@ def main() -> None:
                 elif duel_state == "ROUND_OVER":
                     if (
                         curr_time >= post_disarm_timer
-                        and not sabers["Person1"].is_disarmed
-                        and not sabers["Person2"].is_disarmed
+                        and not s_blue.is_disarmed
+                        and not s_red.is_disarmed
                     ):
                         if active_saber_count == 2:
                             duel_state = "COUNTDOWN"
                             countdown_time_left = 2.0  # Quick 2-second countdown for next round
 
-                # Collision detection and Duel Combat mechanics
-                s1 = sabers["Person1"]
-                s2 = sabers["Person2"]
+                # -------------------------------------------------------------
+                # BLADE COLLISION & PARRY COMBAT EVALUATION
+                # -------------------------------------------------------------
                 is_currently_colliding = False
 
                 if (
-                    s1.is_active
-                    and s2.is_active
-                    and s1.current_emitter
-                    and s1.current_endpoint
-                    and s2.current_emitter
-                    and s2.current_endpoint
+                    s_blue.is_active
+                    and s_red.is_active
+                    and s_blue.current_emitter
+                    and s_blue.current_endpoint
+                    and s_red.current_emitter
+                    and s_red.current_endpoint
                 ):
                     collision = check_blade_collision(
-                        s1.current_emitter,
-                        s1.current_endpoint,
-                        s2.current_emitter,
-                        s2.current_endpoint,
+                        s_blue.current_emitter,
+                        s_blue.current_endpoint,
+                        s_red.current_emitter,
+                        s_red.current_endpoint,
                     )
                     if collision is not None:
                         is_currently_colliding = True
@@ -278,24 +354,24 @@ def main() -> None:
                         )
 
                         # 2. Apply spring-damper recoil impulses
-                        if s1.current_direction and s2.current_direction:
+                        if s_blue.current_direction and s_red.current_direction:
                             recoil_controller.apply_clash_impulse(
                                 "Person1",
                                 "Person2",
                                 collision.normal,
-                                s1.current_direction,
-                                s2.current_direction,
+                                s_blue.current_direction,
+                                s_red.current_direction,
                                 impulse_magnitude=0.45,
                             )
 
                         # 3. Evaluate duel combat mechanics (parry vs missed parry)
-                        if s1.current_direction and s2.current_direction:
+                        if s_blue.current_direction and s_red.current_direction:
                             clash_eval = evaluate_duel_clash(
                                 collision=collision,
-                                s1_dir=s1.current_direction,
-                                s2_dir=s2.current_direction,
-                                s1_speed=s1.tip_speed,
-                                s2_speed=s2.tip_speed,
+                                s1_dir=s_blue.current_direction,
+                                s2_dir=s_red.current_direction,
+                                s1_speed=s_blue.tip_speed,
+                                s2_speed=s_red.tip_speed,
                                 is_new_clash=is_new_clash,
                                 is_duel_active=(duel_state == "DUEL_ACTIVE"),
                                 strike_min_speed=config.duel.strike_min_speed,
@@ -358,7 +434,7 @@ def main() -> None:
 
                 particle_system.update(dt)
 
-                # 1. Render physical hilts for active hand grips
+                # 1. Render physical hilts for active hand grips (with dynamic perspective scaling)
                 for saber in sabers.values():
                     if (
                         saber.is_active
@@ -371,6 +447,7 @@ def main() -> None:
                             saber.current_hilt_start,
                             saber.current_hilt_end,
                             saber.current_direction,
+                            scale_factor=saber.scale_factor,
                         )
 
                 # 2. Reusable pre-allocated light canvas (zero-allocation)
@@ -383,7 +460,7 @@ def main() -> None:
                 # Motion trails
                 if show_trail:
                     for saber in sabers.values():
-                        if len(saber.trail_history) >= 2:
+                        if len(saber.trail_history) >= 2 and saber.is_active:
                             draw_trail_on_light_canvas(
                                 light_canvas,
                                 saber.trail_history,
@@ -392,7 +469,7 @@ def main() -> None:
                                 curr_time,
                             )
 
-                # Luminous blades extending outward from hands
+                # Luminous blades extending outward from hands (with dynamic perspective scaling)
                 for saber in sabers.values():
                     if (
                         saber.is_active
@@ -405,6 +482,7 @@ def main() -> None:
                             saber.current_endpoint,
                             saber.color,
                             curr_time=curr_time,
+                            scale_factor=saber.scale_factor,
                         )
 
                 # Render Newtonian sparks with thermal color decay
@@ -413,9 +491,20 @@ def main() -> None:
                 # 3. Additive bloom and compositing with saturating addition
                 composite_light_layer(frame, light_canvas, show_glow=show_glow)
 
-                # 4. Cinematic Duel HUD & Countdown Display
+                # 4. Floating Gesture Prompts above unignited hands
+                for obs in observations:
+                    if obs is not matched_blue_obs and obs is not matched_red_obs:
+                        wx, wy = int(obs.wrist[0]), int(obs.wrist[1])
+                        hint_text = "2 FINGERS -> BLUE | FORCE PUSH -> RED"
+                        (tw, _), _ = cv2.getTextSize(hint_text, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 2)
+                        tx = max(10, min(frame_width - tw - 10, wx - tw // 2))
+                        ty = max(40, wy - 35)
+                        cv2.putText(frame, hint_text, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 4, cv2.LINE_AA)
+                        cv2.putText(frame, hint_text, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 240, 255), 2, cv2.LINE_AA)
+
+                # 5. Cinematic Duel HUD & Countdown Display
                 if duel_state == "AWAITING_PLAYERS":
-                    status_str = f"AWAITING 2 JEDI... ({active_saber_count}/2 READY)"
+                    status_str = f"AWAITING JEDI & SITH... ({active_saber_count}/2 IGNITED)"
                     draw_centered_text(frame, status_str, y=60, font_scale=0.85, color=(160, 200, 255))
                 elif duel_state == "COUNTDOWN":
                     sec_num = int(math.ceil(countdown_time_left))
@@ -433,14 +522,14 @@ def main() -> None:
                 elif duel_state == "ROUND_OVER":
                     draw_centered_text(
                         frame,
-                        "ROUND OVER — DISARM RECORDED",
+                        "ROUND OVER — FORM SIGN TO RE-IGNITE",
                         y=50,
                         font_scale=0.8,
                         color=(30, 100, 255),
                         thickness=2,
                     )
 
-                # Active combat banner feedback (Parry / Disarm notification)
+                # Active combat banner feedback (Ignition / Parry / Disarm notification)
                 if active_banner_text and curr_time < active_banner_expiry:
                     draw_centered_text(
                         frame,
@@ -452,13 +541,13 @@ def main() -> None:
                         outline_thickness=7,
                     )
 
-                # 5. Optional Technical Debug Overlay
+                # 6. Optional Technical Debug Overlay
                 if show_debug:
                     draw_hand_landmarks(frame, raw_observations)
                     active_sabers = [k for k, s in sabers.items() if s.is_active]
                     status_text = (
                         f"FPS: {fps:.1f} | Duel: {duel_state} | Sabers: {len(active_sabers)}/2 | "
-                        f"Sparks: {len(particle_system.sparks)} | S1 Spd: {s1.tip_speed:.0f} | S2 Spd: {s2.tip_speed:.0f}"
+                        f"Sparks: {len(particle_system.sparks)} | Blue Spd: {s_blue.tip_speed:.0f} | Red Spd: {s_red.tip_speed:.0f}"
                     )
                     cv2.putText(
                         frame,
@@ -490,32 +579,33 @@ def main() -> None:
                     particle_system.spawn_clash_sparks(frame_width / 2.0, frame_height / 2.0, count=35)
                 elif key in (ord("k"), ord("K")):  # 'k' to knock out / disarm Person2 for demo
                     victim = sabers["Person2"]
-                    floor_y = frame_height - 20.0
-                    init_angle = (
-                        math.atan2(victim.current_direction[1], victim.current_direction[0])
-                        if victim.current_direction
-                        else -0.6
-                    )
-                    hilt_pos = (
-                        victim.current_hilt_end
-                        or victim.current_emitter
-                        or (frame_width * 0.7, frame_height * 0.4)
-                    )
-                    falling_sabers.append(
-                        FallingSaber(
-                            hilt_pos=hilt_pos,
-                            initial_velocity=(180.0, -260.0),
-                            initial_angle=init_angle,
-                            angular_velocity=8.0,
-                            color=victim.color,
-                            blade_length=victim.current_blade_length,
-                            floor_y=floor_y,
-                            floor_width=float(frame_width),
+                    if victim.is_active:
+                        floor_y = frame_height - 20.0
+                        init_angle = (
+                            math.atan2(victim.current_direction[1], victim.current_direction[0])
+                            if victim.current_direction
+                            else -0.6
                         )
-                    )
-                    victim.disarm(curr_time, duration=3.5)
-                    duel_state = "ROUND_OVER"
-                    post_disarm_timer = curr_time + config.duel.post_disarm_cooldown
+                        hilt_pos = (
+                            victim.current_hilt_end
+                            or victim.current_emitter
+                            or (frame_width * 0.7, frame_height * 0.4)
+                        )
+                        falling_sabers.append(
+                            FallingSaber(
+                                hilt_pos=hilt_pos,
+                                initial_velocity=(180.0, -260.0),
+                                initial_angle=init_angle,
+                                angular_velocity=8.0,
+                                color=victim.color,
+                                blade_length=victim.current_blade_length,
+                                floor_y=floor_y,
+                                floor_width=float(frame_width),
+                            )
+                        )
+                        victim.disarm(curr_time, duration=3.5)
+                        duel_state = "ROUND_OVER"
+                        post_disarm_timer = curr_time + config.duel.post_disarm_cooldown
                 elif key in (ord("r"), ord("R")):  # 'r' to reset
                     for saber in sabers.values():
                         saber.reset()

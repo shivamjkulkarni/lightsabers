@@ -15,17 +15,22 @@ def render_hilt(
     hilt_start: Point2D,
     hilt_end: Point2D,
     direction: Vector2D,
+    scale_factor: float = 1.0,
 ) -> None:
     """Render a clean procedural lightsaber hilt held inside the hand."""
     p_start = (int(hilt_start[0]), int(hilt_start[1]))
     p_end = (int(hilt_end[0]), int(hilt_end[1]))
 
     hilt_length = math.hypot(p_end[0] - p_start[0], p_end[1] - p_start[1])
-    if hilt_length < 8.0:
+    if hilt_length < 6.0:
         return
 
+    # Scale hilt thickness with distance
+    grip_width = max(6, int(14 * scale_factor))
+    cap_width = max(7, int(16 * scale_factor))
+
     # Main dark cylindrical grip body
-    cv2.line(frame, p_start, p_end, (35, 35, 35), 14, cv2.LINE_AA)
+    cv2.line(frame, p_start, p_end, (35, 35, 35), grip_width, cv2.LINE_AA)
 
     # Textured grip segments
     num_ribs = 3
@@ -33,7 +38,7 @@ def render_hilt(
         frac = i / (num_ribs + 1)
         rx = int(p_start[0] + frac * (p_end[0] - p_start[0]))
         ry = int(p_start[1] + frac * (p_end[1] - p_start[1]))
-        cv2.circle(frame, (rx, ry), 7, (18, 18, 18), 2, cv2.LINE_AA)
+        cv2.circle(frame, (rx, ry), max(3, int(7 * scale_factor)), (18, 18, 18), max(1, int(2 * scale_factor)), cv2.LINE_AA)
 
     # Metallic pommel cap at base
     pommel_len = min(10.0, hilt_length * 0.2)
@@ -42,7 +47,7 @@ def render_hilt(
         p_start,
         (int(p_start[0] + direction[0] * pommel_len), int(p_start[1] + direction[1] * pommel_len)),
         (150, 150, 150),
-        16,
+        cap_width,
         cv2.LINE_AA,
     )
 
@@ -52,14 +57,14 @@ def render_hilt(
         int(p_end[0] - direction[0] * collar_len),
         int(p_end[1] - direction[1] * collar_len),
     )
-    cv2.line(frame, collar_start, p_end, (190, 190, 190), 16, cv2.LINE_AA)
+    cv2.line(frame, collar_start, p_end, (190, 190, 190), cap_width, cv2.LINE_AA)
 
     # Amber activation switch stud
     switch_pt = (
         int(p_start[0] + 0.65 * (p_end[0] - p_start[0])),
         int(p_start[1] + 0.65 * (p_end[1] - p_start[1])),
     )
-    cv2.circle(frame, switch_pt, 3, (0, 180, 255), -1, cv2.LINE_AA)
+    cv2.circle(frame, switch_pt, max(2, int(3 * scale_factor)), (0, 180, 255), -1, cv2.LINE_AA)
 
 
 def draw_blade_on_light_canvas(
@@ -68,6 +73,7 @@ def draw_blade_on_light_canvas(
     endpoint: Point2D,
     color: Tuple[int, int, int],
     curr_time: float = 0.0,
+    scale_factor: float = 1.0,
 ) -> None:
     """Draw multi-tier lightsaber plasma core directly onto light canvas."""
     p_start = (int(emitter[0]), int(emitter[1]))
@@ -76,8 +82,8 @@ def draw_blade_on_light_canvas(
     # Subtle plasma shimmer (micro-oscillations in core energy)
     shimmer = 1.0 + 0.06 * math.sin(curr_time * 28.0)
 
-    # 1. Outer saturated blade
-    outer_width = max(8, int(15 * shimmer))
+    # 1. Outer saturated blade (scales with distance)
+    outer_width = max(5, int(14 * scale_factor * shimmer))
     cv2.line(light_canvas, p_start, p_end, color, outer_width, cv2.LINE_AA)
     cv2.circle(light_canvas, p_end, outer_width // 2, color, -1, cv2.LINE_AA)
 
@@ -87,17 +93,19 @@ def draw_blade_on_light_canvas(
         min(255, int(color[1] * 0.35 + 255 * 0.65)),
         min(255, int(color[2] * 0.35 + 255 * 0.65)),
     )
-    inner_width = max(4, int(7 * shimmer))
+    inner_width = max(3, int(6 * scale_factor * shimmer))
     cv2.line(light_canvas, p_start, p_end, inner_color, inner_width, cv2.LINE_AA)
     cv2.circle(light_canvas, p_end, max(2, inner_width // 2), inner_color, -1, cv2.LINE_AA)
 
     # 3. White-hot center
-    cv2.line(light_canvas, p_start, p_end, (255, 255, 255), 3, cv2.LINE_AA)
-    cv2.circle(light_canvas, p_end, 3, (255, 255, 255), -1, cv2.LINE_AA)
+    center_width = max(1, int(2.5 * scale_factor))
+    cv2.line(light_canvas, p_start, p_end, (255, 255, 255), center_width, cv2.LINE_AA)
+    cv2.circle(light_canvas, p_end, center_width, (255, 255, 255), -1, cv2.LINE_AA)
 
     # 4. Radiant Emitter Flare (corona where blade erupts from hand)
-    cv2.circle(light_canvas, p_start, 9, inner_color, -1, cv2.LINE_AA)
-    cv2.circle(light_canvas, p_start, 5, (255, 255, 255), -1, cv2.LINE_AA)
+    flare_radius = max(3, int(8 * scale_factor))
+    cv2.circle(light_canvas, p_start, flare_radius, inner_color, -1, cv2.LINE_AA)
+    cv2.circle(light_canvas, p_start, max(2, flare_radius // 2), (255, 255, 255), -1, cv2.LINE_AA)
 
 
 def draw_trail_on_light_canvas(

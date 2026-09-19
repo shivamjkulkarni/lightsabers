@@ -26,6 +26,7 @@ class SaberInstance:
         alpha_pivot: float = 0.65,
         alpha_direction: float = 0.60,
         grace_period: float = 0.20,
+        is_ignited: bool = True,
     ) -> None:
         self.handedness = handedness
         self.color = color
@@ -44,8 +45,14 @@ class SaberInstance:
         self.last_seen_time: float = 0.0
         self.is_active: bool = False
 
+        # Ignition and hand assignment state
+        self.is_ignited: bool = is_ignited
+        self.ignition_progress: float = 1.0 if is_ignited else 0.0
+        self.scale_factor: float = 1.0
+        self.assigned_wrist_pos: Optional[Point2D] = None
+
         # Distance-scaled blade length smoothing
-        self.current_blade_length: float = 480.0
+        self.current_blade_length: float = 550.0
 
         # Velocity tracking
         self.tip_speed: float = 0.0
@@ -56,10 +63,18 @@ class SaberInstance:
         self.is_disarmed: bool = False
         self.disarm_until_time: float = 0.0
 
+    def ignite(self) -> None:
+        """Trigger lightsaber plasma ignition."""
+        self.is_ignited = True
+        self.ignition_progress = 0.05
+
     def disarm(self, curr_time: float, duration: float = 3.5) -> None:
         """Knock saber out of hand and initiate re-arm cooldown."""
         self.is_disarmed = True
         self.is_active = False
+        self.is_ignited = False
+        self.ignition_progress = 0.0
+        self.assigned_wrist_pos = None
         self.disarm_until_time = curr_time + duration
         self.trail_history.clear()
         self.emitter_smoother.reset()
@@ -73,7 +88,7 @@ class SaberInstance:
         if self.current_direction is None or self.current_emitter is None:
             return
 
-        effective_len = blade_length if blade_length is not None else self.current_blade_length
+        effective_len = blade_length if blade_length is not None else (self.current_blade_length * self.ignition_progress)
 
         cos_a, sin_a = math.cos(recoil_angle), math.sin(recoil_angle)
         dx, dy = self.current_direction
@@ -93,10 +108,13 @@ class SaberInstance:
         self,
         observation: Optional[HandObservation],
         curr_time: float,
-        blade_length: float = 550.0,
+        blade_length: float = 360.0,
         trail_duration: float = 0.22,
+        scale_factor: float = 1.0,
     ) -> None:
         """Update saber state from hand observation, tracking velocity and disarm status."""
+        self.scale_factor = scale_factor
+
         # Check disarm cooldown recovery
         if self.is_disarmed:
             if curr_time >= self.disarm_until_time:
@@ -105,10 +123,20 @@ class SaberInstance:
                 self.is_active = False
                 return
 
+        # Saber must be ignited to become active
+        if not self.is_ignited:
+            self.is_active = False
+            return
+
         if observation is not None:
+            # Advance ignition extension animation
+            dt_step = max(1e-4, curr_time - self.last_seen_time) if self.last_seen_time > 0 else 0.016
+            self.ignition_progress = min(1.0, self.ignition_progress + dt_step * 3.5)
+
             # Smooth blade length dynamically
             self.current_blade_length = 0.85 * self.current_blade_length + 0.15 * blade_length
-            effective_len = self.current_blade_length
+            effective_len = self.current_blade_length * self.ignition_progress
+            self.assigned_wrist_pos = observation.wrist
 
             # Calculate arm-extended geometry
             if hasattr(observation, "knuckles_center"):
@@ -182,6 +210,9 @@ class SaberInstance:
         self.current_hilt_end = None
         self.current_direction = None
         self.is_active = False
+        self.is_ignited = False
+        self.ignition_progress = 0.0
+        self.assigned_wrist_pos = None
         self.is_disarmed = False
         self.disarm_until_time = 0.0
         self.tip_speed = 0.0

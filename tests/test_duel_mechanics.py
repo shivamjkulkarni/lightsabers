@@ -31,16 +31,20 @@ class TestDuelMechanics(unittest.TestCase):
 
     def test_distance_scaled_blade_length(self) -> None:
         """Verify blade scales proportionally with hand distance and respects clamps."""
-        # Normal distance (hand_size = 55px -> 55 * 7.5 = 412.5px)
-        length_normal = calculate_distance_scaled_blade_length(55.0, hand_to_blade_ratio=7.5)
-        self.assertAlmostEqual(length_normal, 412.5, delta=1.0)
+        # Reference desk distance (hand_size = 95px -> 550.0px)
+        length_normal = calculate_distance_scaled_blade_length(95.0)
+        self.assertAlmostEqual(length_normal, 550.0, delta=1.0)
 
-        # Far distance (hand_size = 18px -> 18 * 7.5 = 135px, clamped to min 180px)
-        length_far = calculate_distance_scaled_blade_length(18.0, hand_to_blade_ratio=7.5, min_length=180.0)
-        self.assertEqual(length_far, 180.0)
+        # Mid distance (hand_size = 65px -> 376.3px)
+        length_mid = calculate_distance_scaled_blade_length(65.0)
+        self.assertAlmostEqual(length_mid, 376.3, delta=1.0)
 
-        # Close-up distance (hand_size = 95px -> 95 * 7.5 = 712.5px, clamped to max 580px)
-        length_close = calculate_distance_scaled_blade_length(95.0, hand_to_blade_ratio=7.5, max_length=580.0)
+        # Far distance (hand_size = 15px -> 550 * (15/95) = 86.8px, clamped to min 120px)
+        length_far = calculate_distance_scaled_blade_length(15.0, min_length=120.0)
+        self.assertEqual(length_far, 120.0)
+
+        # Close-up distance (hand_size = 130px -> clamped to max 580px)
+        length_close = calculate_distance_scaled_blade_length(130.0, max_length=580.0)
         self.assertEqual(length_close, 580.0)
 
     def test_two_person_tracker_single_person_filter(self) -> None:
@@ -169,3 +173,4 @@ class TestDuelMechanics(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -38,10 +38,10 @@ class SaberVisualConfig:
     grace_period: float = 0.20  # seconds before lost hand disappears
 
     # Distance-based blade scaling
-    hand_to_blade_ratio: float = 7.5
-    min_blade_length: float = 180.0
+    hand_to_blade_ratio: float = 5.8
+    min_blade_length: float = 120.0
     max_blade_length: float = 580.0
-    reference_hand_size: float = 65.0
+    reference_hand_size: float = 95.0
 
     # Traditional Star Wars BGR colors
     jedi_blue: Tuple[int, int, int] = (255, 90, 20)   # Iconic Jedi Blue
