@@ -35,6 +35,7 @@ class HandObservation:
     knuckles_center: Tuple[float, float]
     palm_center: Tuple[float, float]
     hand_size: float = 65.0  # 3D tilt-invariant physical hand span in pixels
+    landmarks_3d: Optional[List[Tuple[float, float, float]]] = None
 
 
 class HandTracker:
@@ -102,6 +103,9 @@ class HandTracker:
             pixel_landmarks: List[Tuple[float, float]] = [
                 (lm.x * w, lm.y * h) for lm in landmarks_proto
             ]
+            landmarks_3d: List[Tuple[float, float, float]] = [
+                (lm.x * w, lm.y * h, getattr(lm, "z", 0.0) * w) for lm in landmarks_proto
+            ]
 
             wrist = pixel_landmarks[WRIST_IDX]
             index_mcp = pixel_landmarks[INDEX_MCP_IDX]
@@ -149,6 +153,7 @@ class HandTracker:
                     knuckles_center=knuckles_center,
                     palm_center=palm_center,
                     hand_size=hand_size,
+                    landmarks_3d=landmarks_3d,
                 )
             )
 

@@ -150,3 +150,4 @@ def run_demo(output_path: str) -> None:
 if __name__ == "__main__":
     out_dir = "/Users/shivam/.gemini/antigravity/brain/0eb7146f-8505-4de8-80fa-cfb71f376f92"
     run_demo(f"{out_dir}/gesture_and_scaling_verification.jpg")
+

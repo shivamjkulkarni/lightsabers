@@ -53,8 +53,23 @@ class SaberVisualConfig:
 
 
 @dataclass
+class IgnitionBoxConfig:
+    """Configuration for the on-screen Ignition Box / Holocron Chamber."""
+    enabled: bool = True
+    # Normalized coordinates (0.0 to 1.0)
+    x_min: float = 0.32
+    y_min: float = 0.15
+    x_max: float = 0.68
+    y_max: float = 0.65
+    # Visual stylings (BGR)
+    idle_color: Tuple[int, int, int] = (0, 215, 255)         # Neon Amber / Holocron Gold
+    hand_inside_color: Tuple[int, int, int] = (255, 255, 255) # Bright White
+    blue_glow: Tuple[int, int, int] = (255, 140, 0)          # Electric Blue
+    red_glow: Tuple[int, int, int] = (30, 40, 255)           # Sith Red
+
+
+@dataclass
 class DuelConfig:
-    countdown_seconds: float = 3.0
     post_disarm_cooldown: float = 2.5
     strike_min_speed: float = 340.0
     strike_speed_ratio: float = 1.7
@@ -69,6 +84,7 @@ class AppConfig:
     camera: CameraConfig = field(default_factory=CameraConfig)
     tracker: TrackerConfig = field(default_factory=TrackerConfig)
     saber: SaberVisualConfig = field(default_factory=SaberVisualConfig)
+    box: IgnitionBoxConfig = field(default_factory=IgnitionBoxConfig)
     duel: DuelConfig = field(default_factory=DuelConfig)
 
     # Runtime toggles

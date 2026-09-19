@@ -25,7 +25,7 @@ from src.geometry import (
     calculate_distance_scaled_blade_length,
     calculate_perspective_scale_factor,
 )
-from src.gestures import is_force_push_pose, is_two_finger_pose
+from src.gestures import is_force_push_pose, is_hand_in_box, is_two_finger_pose
 from src.hand_tracker import HandTracker, TwoPersonTracker, draw_hand_landmarks
 from src.particles import ParticleSystem
 from src.renderer import (
@@ -34,6 +34,7 @@ from src.renderer import (
     draw_blade_on_light_canvas,
     draw_trail_on_light_canvas,
     render_hilt,
+    render_ignition_box,
 )
 from src.saber import SaberInstance
 
@@ -119,9 +120,8 @@ def main() -> None:
     recoil_controller = BladeRecoilController(omega=38.0, zeta=0.75)
     falling_sabers: List[FallingSaber] = []
 
-    # Duel state machine: "AWAITING_PLAYERS" -> "COUNTDOWN" -> "DUEL_ACTIVE" -> "ROUND_OVER"
-    duel_state = "AWAITING_PLAYERS"
-    countdown_time_left = config.duel.countdown_seconds
+    # Duel state machine: "AWAITING_IGNITION" -> "DUEL_ACTIVE" -> "ROUND_OVER"
+    duel_state = "AWAITING_IGNITION"
     active_banner_text: Optional[str] = None
     active_banner_color: Tuple[int, int, int] = (0, 255, 128)
     active_banner_expiry: float = 0.0
@@ -162,12 +162,21 @@ def main() -> None:
                 observations = person_tracker.update(raw_observations, curr_time)
 
                 # -------------------------------------------------------------
-                # GESTURE RECOGNITION & HAND-TO-SABER BINDING
+                # GESTURE RECOGNITION & HAND-TO-SABER BINDING (IGNITION BOX)
                 # -------------------------------------------------------------
                 s_blue = sabers["Person1"]
                 s_red = sabers["Person2"]
 
-                # Check unassigned hands for ignition gestures
+                box_x1 = int(config.box.x_min * frame_width)
+                box_y1 = int(config.box.y_min * frame_height)
+                box_x2 = int(config.box.x_max * frame_width)
+                box_y2 = int(config.box.y_max * frame_height)
+                ignition_box_rect = (box_x1, box_y1, box_x2, box_y2)
+
+                has_hand_in_box = False
+                detected_box_gesture = None
+
+                # Check unassigned hands for ignition gestures ONLY within the ignition box
                 for obs in observations:
                     is_near_blue = (
                         s_blue.is_ignited
@@ -182,25 +191,32 @@ def main() -> None:
 
                     # Hand is free to ignite a lightsaber
                     if not is_near_blue and not is_near_red:
-                        # 1. Two-Finger Pose -> Ignites Jedi Blue on THIS hand
-                        if not s_blue.is_ignited and not s_blue.is_disarmed:
-                            if is_two_finger_pose(obs.landmarks):
-                                s_blue.ignite()
-                                s_blue.assigned_wrist_pos = obs.wrist
-                                particle_system.spawn_clash_sparks(obs.knuckles_center[0], obs.knuckles_center[1], count=25)
-                                active_banner_text = "JEDI BLUE IGNITED! (TWO-FINGER POSE)"
-                                active_banner_color = (255, 120, 0)
-                                active_banner_expiry = curr_time + 1.5
+                        # Strictly require hand to be inside the designated Ignition Box
+                        if is_hand_in_box(obs.wrist, obs.knuckles_center, ignition_box_rect):
+                            has_hand_in_box = True
+                            lms = obs.landmarks_3d if obs.landmarks_3d else obs.landmarks
 
-                        # 2. Force Push / Open Palm -> Ignites Sith Red on THIS hand
-                        if not s_red.is_ignited and not s_red.is_disarmed:
-                            if is_force_push_pose(obs.landmarks):
-                                s_red.ignite()
-                                s_red.assigned_wrist_pos = obs.wrist
-                                particle_system.spawn_clash_sparks(obs.knuckles_center[0], obs.knuckles_center[1], count=25)
-                                active_banner_text = "SITH RED IGNITED! (FORCE PUSH)"
-                                active_banner_color = (30, 60, 255)
-                                active_banner_expiry = curr_time + 1.5
+                            # 1. Two-Finger Pose -> Ignites Jedi Blue on THIS hand
+                            if not s_blue.is_ignited and not s_blue.is_disarmed:
+                                if is_two_finger_pose(lms):
+                                    detected_box_gesture = "JediBlue"
+                                    s_blue.ignite()
+                                    s_blue.assigned_wrist_pos = obs.wrist
+                                    particle_system.spawn_clash_sparks(obs.knuckles_center[0], obs.knuckles_center[1], count=30)
+                                    active_banner_text = "JEDI BLUE IGNITED!"
+                                    active_banner_color = (255, 140, 0)
+                                    active_banner_expiry = curr_time + 1.5
+
+                            # 2. Force Push / Open Palm -> Ignites Sith Red on THIS hand
+                            if not s_red.is_ignited and not s_red.is_disarmed:
+                                if is_force_push_pose(lms):
+                                    detected_box_gesture = "SithRed"
+                                    s_red.ignite()
+                                    s_red.assigned_wrist_pos = obs.wrist
+                                    particle_system.spawn_clash_sparks(obs.knuckles_center[0], obs.knuckles_center[1], count=30)
+                                    active_banner_text = "SITH RED IGNITED!"
+                                    active_banner_color = (30, 40, 255)
+                                    active_banner_expiry = curr_time + 1.5
 
                 # -------------------------------------------------------------
                 # TRACK & UPDATE MATCHING HANDS FOR EACH SABER
@@ -292,25 +308,19 @@ def main() -> None:
                         saber.apply_recoil(angle)
 
                 # -------------------------------------------------------------
-                # DUEL STATE MACHINE UPDATES
+                # DUEL STATE MACHINE UPDATES (IMMEDIATE COMBAT, NO COUNTDOWN)
                 # -------------------------------------------------------------
                 active_saber_count = sum(1 for s in sabers.values() if s.is_active and s.is_ignited)
 
-                if duel_state == "AWAITING_PLAYERS":
+                if duel_state == "AWAITING_IGNITION":
                     if active_saber_count == 2:
-                        duel_state = "COUNTDOWN"
-                        countdown_time_left = config.duel.countdown_seconds
-                elif duel_state == "COUNTDOWN":
-                    if active_saber_count < 2:
-                        # Combatant lowered hand or extinguished blade
-                        duel_state = "AWAITING_PLAYERS"
-                    else:
-                        countdown_time_left -= dt
-                        if countdown_time_left <= 0.0:
-                            duel_state = "DUEL_ACTIVE"
-                            active_banner_text = "ENGAGE! DUEL ACTIVE"
-                            active_banner_color = (0, 255, 255)
-                            active_banner_expiry = curr_time + 1.2
+                        duel_state = "DUEL_ACTIVE"
+                        active_banner_text = "ENGAGE! COMBAT ACTIVE"
+                        active_banner_color = (0, 255, 255)
+                        active_banner_expiry = curr_time + 1.2
+                elif duel_state == "DUEL_ACTIVE":
+                    if active_saber_count < 2 and not s_blue.is_disarmed and not s_red.is_disarmed:
+                        duel_state = "AWAITING_IGNITION"
                 elif duel_state == "ROUND_OVER":
                     if (
                         curr_time >= post_disarm_timer
@@ -318,8 +328,9 @@ def main() -> None:
                         and not s_red.is_disarmed
                     ):
                         if active_saber_count == 2:
-                            duel_state = "COUNTDOWN"
-                            countdown_time_left = 2.0  # Quick 2-second countdown for next round
+                            duel_state = "DUEL_ACTIVE"
+                        else:
+                            duel_state = "AWAITING_IGNITION"
 
                 # -------------------------------------------------------------
                 # BLADE COLLISION & PARRY COMBAT EVALUATION
@@ -488,28 +499,25 @@ def main() -> None:
                 # Render Newtonian sparks with thermal color decay
                 particle_system.draw(light_canvas)
 
+                # Render holographic on-screen Ignition Chamber
+                render_ignition_box(
+                    frame,
+                    light_canvas,
+                    ignition_box_rect,
+                    has_hand_inside=has_hand_in_box,
+                    detected_gesture=detected_box_gesture,
+                    is_blue_ignited=s_blue.is_ignited,
+                    is_red_ignited=s_red.is_ignited,
+                    curr_time=curr_time,
+                )
+
                 # 3. Additive bloom and compositing with saturating addition
                 composite_light_layer(frame, light_canvas, show_glow=show_glow)
 
-                # 4. Floating Gesture Prompts above unignited hands
-                for obs in observations:
-                    if obs is not matched_blue_obs and obs is not matched_red_obs:
-                        wx, wy = int(obs.wrist[0]), int(obs.wrist[1])
-                        hint_text = "2 FINGERS -> BLUE | FORCE PUSH -> RED"
-                        (tw, _), _ = cv2.getTextSize(hint_text, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 2)
-                        tx = max(10, min(frame_width - tw - 10, wx - tw // 2))
-                        ty = max(40, wy - 35)
-                        cv2.putText(frame, hint_text, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 4, cv2.LINE_AA)
-                        cv2.putText(frame, hint_text, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 240, 255), 2, cv2.LINE_AA)
-
-                # 5. Cinematic Duel HUD & Countdown Display
-                if duel_state == "AWAITING_PLAYERS":
-                    status_str = f"AWAITING JEDI & SITH... ({active_saber_count}/2 IGNITED)"
-                    draw_centered_text(frame, status_str, y=60, font_scale=0.85, color=(160, 200, 255))
-                elif duel_state == "COUNTDOWN":
-                    sec_num = int(math.ceil(countdown_time_left))
-                    cd_text = f"DUEL IN: {sec_num}" if sec_num > 0 else "ENGAGE!"
-                    draw_centered_text(frame, cd_text, y=100, font_scale=1.4, color=(0, 230, 255), thickness=4)
+                # 4. Duel HUD Display
+                if duel_state == "AWAITING_IGNITION":
+                    status_str = f"AWAITING IGNITION IN CHAMBER ({active_saber_count}/2 ACTIVE)"
+                    draw_centered_text(frame, status_str, y=50, font_scale=0.75, color=(160, 200, 255))
                 elif duel_state == "DUEL_ACTIVE":
                     draw_centered_text(
                         frame,
@@ -522,9 +530,9 @@ def main() -> None:
                 elif duel_state == "ROUND_OVER":
                     draw_centered_text(
                         frame,
-                        "ROUND OVER — FORM SIGN TO RE-IGNITE",
+                        "ROUND OVER — PLACE HAND IN BOX TO RE-IGNITE",
                         y=50,
-                        font_scale=0.8,
+                        font_scale=0.75,
                         color=(30, 100, 255),
                         thickness=2,
                     )
@@ -613,8 +621,7 @@ def main() -> None:
                     recoil_controller.reset()
                     particle_system.clear()
                     falling_sabers.clear()
-                    duel_state = "AWAITING_PLAYERS"
-                    countdown_time_left = config.duel.countdown_seconds
+                    duel_state = "AWAITING_IGNITION"
                     active_banner_text = None
 
     except FileNotFoundError as e:

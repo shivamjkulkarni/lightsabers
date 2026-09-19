@@ -239,3 +239,103 @@ def render_trail(
     light = np.zeros_like(frame)
     draw_trail_on_light_canvas(light, trail_history, color, trail_duration, curr_time)
     composite_light_layer(frame, light, show_glow=show_glow)
+
+
+def render_ignition_box(
+    frame: np.ndarray,
+    light_canvas: np.ndarray,
+    box_rect: Tuple[int, int, int, int],
+    has_hand_inside: bool,
+    detected_gesture: Optional[str],
+    is_blue_ignited: bool,
+    is_red_ignited: bool,
+    curr_time: float,
+) -> None:
+    """
+    Draw a stylized sci-fi holographic Ignition Chamber / Box.
+    
+    If both sabers are already ignited, gracefully dims the box.
+    Highlights when a hand is present, and flares in Electric Blue or Sith Crimson
+    when an ignition gesture is performed.
+    """
+    bx1, by1, bx2, by2 = box_rect
+    box_w = bx2 - bx1
+    box_h = by2 - by1
+
+    both_ignited = is_blue_ignited and is_red_ignited
+
+    # Determine state color
+    if detected_gesture == "JediBlue":
+        border_color = (255, 140, 0)  # Neon Cyan/Blue
+        glow_color = (255, 180, 50)
+    elif detected_gesture == "SithRed":
+        border_color = (30, 40, 255)  # Crimson Red
+        glow_color = (80, 80, 255)
+    elif has_hand_inside:
+        pulse = 0.5 + 0.5 * math.sin(curr_time * 8.0)
+        c_val = int(200 + 55 * pulse)
+        border_color = (c_val, c_val, c_val)
+        glow_color = (255, 220, 100)
+    else:
+        border_color = (0, 215, 255)  # Idle Holocron amber
+        glow_color = (0, 140, 200)
+
+    # Base border
+    dim_mult = 0.2 if both_ignited else 0.4
+    dim_color = (
+        int(border_color[0] * dim_mult),
+        int(border_color[1] * dim_mult),
+        int(border_color[2] * dim_mult),
+    )
+    cv2.rectangle(frame, (bx1, by1), (bx2, by2), dim_color, 1, cv2.LINE_AA)
+
+    # Corner brackets
+    corner_len = min(40, box_w // 5, box_h // 5)
+    thickness = 2 if not has_hand_inside else 3
+
+    # Top-Left
+    cv2.line(frame, (bx1, by1), (bx1 + corner_len, by1), border_color, thickness, cv2.LINE_AA)
+    cv2.line(frame, (bx1, by1), (bx1, by1 + corner_len), border_color, thickness, cv2.LINE_AA)
+    # Top-Right
+    cv2.line(frame, (bx2, by1), (bx2 - corner_len, by1), border_color, thickness, cv2.LINE_AA)
+    cv2.line(frame, (bx2, by1), (bx2, by1 + corner_len), border_color, thickness, cv2.LINE_AA)
+    # Bottom-Left
+    cv2.line(frame, (bx1, by2), (bx1 + corner_len, by2), border_color, thickness, cv2.LINE_AA)
+    cv2.line(frame, (bx1, by2), (bx1, by2 - corner_len), border_color, thickness, cv2.LINE_AA)
+    # Bottom-Right
+    cv2.line(frame, (bx2, by2), (bx2 - corner_len, by2), border_color, thickness, cv2.LINE_AA)
+    cv2.line(frame, (bx2, by2), (bx2, by2 - corner_len), border_color, thickness, cv2.LINE_AA)
+
+    # Soft glowing bloom on light_canvas for the brackets
+    if not both_ignited:
+        cv2.line(light_canvas, (bx1, by1), (bx1 + corner_len, by1), glow_color, thickness + 3, cv2.LINE_AA)
+        cv2.line(light_canvas, (bx1, by1), (bx1, by1 + corner_len), glow_color, thickness + 3, cv2.LINE_AA)
+        cv2.line(light_canvas, (bx2, by1), (bx2 - corner_len, by1), glow_color, thickness + 3, cv2.LINE_AA)
+        cv2.line(light_canvas, (bx2, by1), (bx2, by1 + corner_len), glow_color, thickness + 3, cv2.LINE_AA)
+        cv2.line(light_canvas, (bx1, by2), (bx1 + corner_len, by2), glow_color, thickness + 3, cv2.LINE_AA)
+        cv2.line(light_canvas, (bx1, by2), (bx1, by2 - corner_len), glow_color, thickness + 3, cv2.LINE_AA)
+        cv2.line(light_canvas, (bx2, by2), (bx2 - corner_len, by2), glow_color, thickness + 3, cv2.LINE_AA)
+        cv2.line(light_canvas, (bx2, by2), (bx2, by2 - corner_len), glow_color, thickness + 3, cv2.LINE_AA)
+
+    # Top Header Label Badge
+    if not both_ignited:
+        title = "[ IGNITION CHAMBER ]"
+        (tw, _), _ = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+        tx = bx1 + (box_w - tw) // 2
+        ty = max(25, by1 - 12)
+        cv2.putText(frame, title, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 4, cv2.LINE_AA)
+        cv2.putText(frame, title, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.55, border_color, 2, cv2.LINE_AA)
+
+        # Contextual prompt below box
+        if has_hand_inside:
+            sub = "FORM POSE: 2 FINGERS (BLUE) | FORCE PUSH (RED)"
+            sub_color = (0, 255, 255)
+        else:
+            sub = "PLACE HAND IN BOX TO IGNITE"
+            sub_color = (180, 220, 255)
+
+        (sw, _), _ = cv2.getTextSize(sub, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+        sx = bx1 + (box_w - sw) // 2
+        sy = by2 + 25
+        cv2.putText(frame, sub, (sx, sy), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 3, cv2.LINE_AA)
+        cv2.putText(frame, sub, (sx, sy), cv2.FONT_HERSHEY_SIMPLEX, 0.45, sub_color, 1, cv2.LINE_AA)
