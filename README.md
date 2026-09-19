@@ -42,13 +42,16 @@ A real-time computer-vision application that turns detected hands into glowing J
 
 ## Features
 
-- **Dual Hand Tracking**: Independently tracks left and right hands simultaneously.
-- **Iconic Dual Colors**: Left hand glows Jedi Guardian Blue/Cyan (`(255, 120, 30)`), Right hand glows Jedi Consular Emerald Green (`(30, 255, 120)`).
-- **Procedural Luminous Blade**: Multi-layer procedural rendering with saturated outer glow, bright inner core, and white-hot center.
-- **High-Performance Bloom**: Half-resolution Gaussian glow blurring and additive compositing for soft, luminous bloom at real-time speeds (30–60 FPS).
-- **Smooth Motion Trails**: Fading polygon ribbons that trail behind blade swings and dissipate naturally over time.
-- **Temporal Jitter Smoothing**: Exponential Moving Average (EMA) filtering for both pivot attachment and unit direction vectors, plus a grace-period fadeout when hands briefly drop out of view.
-- **Procedural Hilts**: Directional metallic grips, emitter collars, and pommel caps rendered around the wrists.
+- **Single-Hand Tracking Per Person**: Detects hands across combatants; if one person raises two hands, only their primary hand holds a saber. If two distinct people enter frame, Person 1 gets Jedi Blue (`(255, 90, 20)`) and Person 2 gets Sith Red (`(30, 30, 255)`).
+- **Line Segment Blade Collision Physics**: Continuous 2D intersection testing between active blade segments.
+- **Elastic Blade Recoil**: Damped harmonic oscillator (`omega=38.0`, `zeta=0.75`) providing tactile spring recoil deflection when sabers clash.
+- **Newtonian Spark Particle Physics**: High-velocity sparks spray outward from clashes with gravitational acceleration ($850\text{px/s}^2$), exponential air drag, thermal color decay (white-hot $\to$ electric yellow $\to$ amber $\to$ cooling red embers), and motion streak rendering.
+- **Floor-Bouncing Disarm Mechanics**: Fast, forceful strikes disarm the defending combatant. The dropped lightsaber tumbles through the air, bounces off the floor with restitution and friction, emits ground sparks, and smoothly retracts back into the hilt before re-arming.
+- **Procedural Luminous Blade**: Multi-layer procedural rendering with saturating outer bloom, bright inner core, and white-hot center using saturating arithmetic (`cv2.add`) to eliminate overflow artifacts.
+- **High-Performance Zero-Latency Bloom**: Half-resolution Gaussian glow blurring, zero-allocation pre-allocated canvas buffers, and camera buffer queue optimization (`CAP_PROP_BUFFERSIZE=1`).
+- **Dynamic Fading Motion Trails**: Tuned fast dissipation ($0.22\text{s}$) with natural exponential decay.
+- **Temporal Jitter Smoothing**: Exponential Moving Average (EMA) filtering for pivot points and unit direction vectors, plus grace period.
+- **Procedural Hilts**: Directional metallic grips, emitter collars, and pommel caps rendered around the hand grips.
 
 ---
 
@@ -90,7 +93,9 @@ python3 src/main.py
 | **`G`** | Toggle soft luminous bloom/glow effect |
 | **`T`** | Toggle motion trails |
 | **`D`** | Toggle debug mode (landmarks, skeleton, HUD status) |
-| **`R`** | Reset tracking smoother and trail history |
+| **`C`** | Spawn test clash sparks at screen center |
+| **`K`** | Knock out / disarm Person 2 (test demonstration) |
+| **`R`** | Reset tracking smoother, particles, and physics states |
 
 ---
 
@@ -101,21 +106,26 @@ lightsabers/
 ├── assets/
 │   └── hand_landmarker.task        # MediaPipe Hand Landmarker task model (auto-downloaded)
 ├── scripts/
+│   ├── demo_collision_physics.py  # Simulation visual generator for collision & disarm
 │   └── download_model.py           # Model asset download helper
 ├── src/
 │   ├── __init__.py
-│   ├── camera.py                   # OpenCV VideoCapture wrapper with selfie flip
+│   ├── camera.py                   # OpenCV VideoCapture wrapper with selfie flip & queue optimization
+│   ├── collision.py                # Line intersection, damped harmonic recoil, disarm trigger
 │   ├── config.py                   # Centralized dataclass configurations & visual settings
-│   ├── geometry.py                 # Pure vector math, blade direction, resolution scaling
-│   ├── hand_tracker.py             # MediaPipe Tasks HandLandmarker wrapper
-│   ├── main.py                     # Main application entry point & event loop
-│   ├── renderer.py                 # Procedural hilt, multi-layer blade, glow, and trails
-│   ├── saber.py                    # SaberInstance state, trail history, and grace periods
+│   ├── falling_saber.py            # Newtonian tumbling, floor bounces, ground sparks, blade retract
+│   ├── geometry.py                 # Vector math, arm extension geometry, resolution scaling
+│   ├── hand_tracker.py             # MediaPipe Tasks HandLandmarker + single-hand filter per person
+│   ├── main.py                     # Main application entry point, event loop & physics integration
+│   ├── particles.py                # Newtonian spark particle system with thermal color decay
+│   ├── renderer.py                 # Multi-pass saturating bloom, procedural hilt, trails, canvas buffer
+│   ├── saber.py                    # SaberInstance state, velocity tracking, recoil & disarm cooldown
 │   └── smoothing.py                # PointSmoother and DirectionSmoother EMA filters
 ├── tests/
 │   ├── __init__.py
+│   ├── test_collision.py           # Unit tests for collision, recoil, sparks, and falling saber
 │   ├── test_geometry.py            # Unit tests for vector math and geometry
-│   └── test_smoothing.py           # Unit tests for EMA smoothing and trail expiration
+│   └── test_smoothing.py           # Unit tests for EMA smoothing, single-hand filter, and canvas buffer
 ├── requirements.txt                # Dependencies (mediapipe, opencv-python, numpy)
 └── README.md
 ```
@@ -130,7 +140,7 @@ Run the test suite without needing a camera:
 python3 -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-All 13 unit tests for vector normalization, zero-vector handling, direction estimation, resolution scaling, EMA smoothing, and trail expiration run in under 0.01 seconds.
+All 25 unit tests for collision detection, spring recoil physics, spark particle dynamics, falling saber floor bounces, vector normalization, single-hand filtering, and canvas buffer reuse run in under 0.02 seconds.
 
 ---
 
