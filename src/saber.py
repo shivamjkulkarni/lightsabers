@@ -44,6 +44,9 @@ class SaberInstance:
         self.last_seen_time: float = 0.0
         self.is_active: bool = False
 
+        # Distance-scaled blade length smoothing
+        self.current_blade_length: float = 480.0
+
         # Velocity tracking
         self.tip_speed: float = 0.0
         self._prev_endpoint: Optional[Point2D] = None
@@ -63,12 +66,14 @@ class SaberInstance:
         self.hilt_start_smoother.reset()
         self.direction_smoother.reset()
 
-    def apply_recoil(self, recoil_angle: float, blade_length: float) -> None:
+    def apply_recoil(self, recoil_angle: float, blade_length: Optional[float] = None) -> None:
         """Apply elastic angular recoil deflection to the blade direction and endpoint."""
         if not self.is_active or abs(recoil_angle) < 1e-4:
             return
         if self.current_direction is None or self.current_emitter is None:
             return
+
+        effective_len = blade_length if blade_length is not None else self.current_blade_length
 
         cos_a, sin_a = math.cos(recoil_angle), math.sin(recoil_angle)
         dx, dy = self.current_direction
@@ -80,8 +85,8 @@ class SaberInstance:
 
         # Updated endpoint
         self.current_endpoint = (
-            self.current_emitter[0] + rot_dx * blade_length,
-            self.current_emitter[1] + rot_dy * blade_length,
+            self.current_emitter[0] + rot_dx * effective_len,
+            self.current_emitter[1] + rot_dy * effective_len,
         )
 
     def update(
@@ -101,13 +106,17 @@ class SaberInstance:
                 return
 
         if observation is not None:
+            # Smooth blade length dynamically
+            self.current_blade_length = 0.85 * self.current_blade_length + 0.15 * blade_length
+            effective_len = self.current_blade_length
+
             # Calculate arm-extended geometry
             if hasattr(observation, "knuckles_center"):
                 raw_emitter, _, raw_hstart, raw_hend, raw_dir = calculate_arm_extended_geometry(
                     observation.wrist,
                     observation.knuckles_center,
                     observation.index_tip,
-                    blade_length=blade_length,
+                    blade_length=effective_len,
                 )
             else:
                 raw_hstart = observation.wrist
@@ -123,8 +132,8 @@ class SaberInstance:
             smooth_dir = self.direction_smoother.update(raw_dir)
 
             smooth_endpoint = (
-                smooth_emitter[0] + smooth_dir[0] * blade_length,
-                smooth_emitter[1] + smooth_dir[1] * blade_length,
+                smooth_emitter[0] + smooth_dir[0] * effective_len,
+                smooth_emitter[1] + smooth_dir[1] * effective_len,
             )
 
             # Compute blade tip speed (pixels/second)

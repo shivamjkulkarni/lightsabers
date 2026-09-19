@@ -22,7 +22,7 @@ class TrackerConfig:
     min_detection_confidence: float = 0.5
     min_presence_confidence: float = 0.5
     min_tracking_confidence: float = 0.5
-    same_person_max_distance_ratio: float = 3.5
+    same_person_max_distance_ratio: float = 5.5
 
 
 @dataclass
@@ -37,6 +37,12 @@ class SaberVisualConfig:
     alpha_direction: float = 0.60
     grace_period: float = 0.20  # seconds before lost hand disappears
 
+    # Distance-based blade scaling
+    hand_to_blade_ratio: float = 7.5
+    min_blade_length: float = 180.0
+    max_blade_length: float = 580.0
+    reference_hand_size: float = 65.0
+
     # Traditional Star Wars BGR colors
     jedi_blue: Tuple[int, int, int] = (255, 90, 20)   # Iconic Jedi Blue
     sith_red: Tuple[int, int, int] = (30, 30, 255)    # Iconic Sith Crimson Red
@@ -47,10 +53,23 @@ class SaberVisualConfig:
 
 
 @dataclass
+class DuelConfig:
+    countdown_seconds: float = 3.0
+    post_disarm_cooldown: float = 2.5
+    strike_min_speed: float = 340.0
+    strike_speed_ratio: float = 1.7
+    parry_min_angle_deg: float = 30.0
+    parry_max_foible_ratio: float = 0.72
+    mutual_clash_min_speed: float = 280.0
+    mutual_clash_ratio: float = 1.6
+
+
+@dataclass
 class AppConfig:
     camera: CameraConfig = field(default_factory=CameraConfig)
     tracker: TrackerConfig = field(default_factory=TrackerConfig)
     saber: SaberVisualConfig = field(default_factory=SaberVisualConfig)
+    duel: DuelConfig = field(default_factory=DuelConfig)
 
     # Runtime toggles
     show_glow: bool = True

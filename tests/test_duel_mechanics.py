@@ -1,0 +1,171 @@
+"""Unit tests for duel countdown, distance-based blade scaling, two-person tracker, and parry mechanics."""
+
+import unittest
+from src.collision import CollisionInfo, evaluate_duel_clash
+from src.geometry import calculate_distance_scaled_blade_length
+from src.hand_tracker import HandObservation, TwoPersonTracker
+
+
+def make_mock_observation(
+    handedness: str,
+    wrist: tuple,
+    knuckles: tuple,
+    hand_size: float = 60.0,
+) -> HandObservation:
+    """Helper to construct a mock HandObservation."""
+    return HandObservation(
+        handedness=handedness,
+        landmarks=[wrist] * 21,
+        wrist=wrist,
+        index_mcp=knuckles,
+        index_tip=(knuckles[0] + 10, knuckles[1]),
+        middle_mcp=knuckles,
+        knuckles_center=knuckles,
+        palm_center=((wrist[0] + knuckles[0]) * 0.5, (wrist[1] + knuckles[1]) * 0.5),
+        hand_size=hand_size,
+    )
+
+
+class TestDuelMechanics(unittest.TestCase):
+    """Test suite for duel countdown, scaling, tracking, and combat evaluation."""
+
+    def test_distance_scaled_blade_length(self) -> None:
+        """Verify blade scales proportionally with hand distance and respects clamps."""
+        # Normal distance (hand_size = 55px -> 55 * 7.5 = 412.5px)
+        length_normal = calculate_distance_scaled_blade_length(55.0, hand_to_blade_ratio=7.5)
+        self.assertAlmostEqual(length_normal, 412.5, delta=1.0)
+
+        # Far distance (hand_size = 18px -> 18 * 7.5 = 135px, clamped to min 180px)
+        length_far = calculate_distance_scaled_blade_length(18.0, hand_to_blade_ratio=7.5, min_length=180.0)
+        self.assertEqual(length_far, 180.0)
+
+        # Close-up distance (hand_size = 95px -> 95 * 7.5 = 712.5px, clamped to max 580px)
+        length_close = calculate_distance_scaled_blade_length(95.0, hand_to_blade_ratio=7.5, max_length=580.0)
+        self.assertEqual(length_close, 580.0)
+
+    def test_two_person_tracker_single_person_filter(self) -> None:
+        """Verify a single person raising 2 hands is filtered to strictly 1 dominant hand."""
+        tracker = TwoPersonTracker(same_person_max_distance_ratio=5.5)
+        h1 = make_mock_observation("Right", (400.0, 300.0), (400.0, 240.0), hand_size=60.0)
+        h2 = make_mock_observation("Left", (550.0, 350.0), (550.0, 290.0), hand_size=60.0)
+
+        filtered = tracker.update([h1, h2], curr_time=1.0)
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0].handedness, "Right")
+
+    def test_two_person_tracker_distinct_people(self) -> None:
+        """Verify two people standing side-by-side are recognized as 2 distinct combatants."""
+        tracker = TwoPersonTracker(same_person_max_distance_ratio=5.5, confirmation_distance_ratio=4.0)
+        # Person 1 on left, Person 2 on right (distance = 550px > 4.0 * 60 = 240px)
+        p1 = make_mock_observation("Right", (250.0, 350.0), (250.0, 290.0), hand_size=60.0)
+        p2 = make_mock_observation("Right", (800.0, 350.0), (800.0, 290.0), hand_size=60.0)
+
+        filtered = tracker.update([p1, p2], curr_time=1.0)
+        self.assertEqual(len(filtered), 2)
+        self.assertTrue(tracker.two_people_confirmed)
+
+    def test_two_person_tracker_clash_proximity_hysteresis(self) -> None:
+        """Verify two distinct people do NOT merge when crossing hands in close proximity during a clash."""
+        tracker = TwoPersonTracker(same_person_max_distance_ratio=5.5, confirmation_distance_ratio=4.0)
+
+        # Step 1: Establish 2 distinct people standing apart
+        p1_initial = make_mock_observation("Right", (300.0, 400.0), (300.0, 340.0), hand_size=60.0)
+        p2_initial = make_mock_observation("Right", (850.0, 400.0), (850.0, 340.0), hand_size=60.0)
+        filtered1 = tracker.update([p1_initial, p2_initial], curr_time=1.0)
+        self.assertEqual(len(filtered1), 2)
+        self.assertTrue(tracker.two_people_confirmed)
+
+        # Step 2: Combatants clash! Wrists move close to screen center (150px apart)
+        p1_clash = make_mock_observation("Right", (550.0, 420.0), (550.0, 360.0), hand_size=60.0)
+        p2_clash = make_mock_observation("Right", (700.0, 420.0), (700.0, 360.0), hand_size=60.0)
+        filtered2 = tracker.update([p1_clash, p2_clash], curr_time=1.05)
+
+        # Should still maintain 2 distinct players despite close proximity!
+        self.assertEqual(len(filtered2), 2)
+        self.assertTrue(tracker.two_people_confirmed)
+
+    def test_parry_evaluation_countdown_suppression(self) -> None:
+        """Verify disarms are suppressed when duel countdown is active."""
+        col = CollisionInfo(clash_point=(600.0, 350.0), normal=(0.0, 1.0), ratio1=0.5, ratio2=0.85)
+        res = evaluate_duel_clash(
+            collision=col,
+            s1_dir=(1.0, 0.0),
+            s2_dir=(0.0, 1.0),
+            s1_speed=450.0,
+            s2_speed=50.0,
+            is_new_clash=True,
+            is_duel_active=False,  # Countdown active
+        )
+        self.assertIsNone(res.disarmed_slot)
+        self.assertEqual(res.reason, "countdown_active")
+
+    def test_parry_evaluation_mutual_clash(self) -> None:
+        """Verify mutual high-velocity attacks result in mutual clash with no disarm."""
+        col = CollisionInfo(clash_point=(600.0, 350.0), normal=(0.0, 1.0), ratio1=0.5, ratio2=0.5)
+        res = evaluate_duel_clash(
+            collision=col,
+            s1_dir=(0.7, 0.7),
+            s2_dir=(-0.7, 0.7),
+            s1_speed=420.0,
+            s2_speed=390.0,
+            is_new_clash=True,
+            is_duel_active=True,
+        )
+        self.assertTrue(res.is_mutual)
+        self.assertIsNone(res.disarmed_slot)
+        self.assertEqual(res.banner_text, "MUTUAL CLASH!")
+
+    def test_parry_evaluation_forte_success(self) -> None:
+        """Verify a defender blocking with the forte (lower blade, ratio <= 0.72) executes a successful parry."""
+        # Person 1 attacks fast (440 px/s), Person 2 blocks across at 90 deg with forte (ratio2 = 0.45)
+        col = CollisionInfo(clash_point=(600.0, 350.0), normal=(0.0, 1.0), ratio1=0.7, ratio2=0.45)
+        res = evaluate_duel_clash(
+            collision=col,
+            s1_dir=(1.0, 0.0),
+            s2_dir=(0.0, 1.0),  # Perpendicular cross (90 deg)
+            s1_speed=440.0,
+            s2_speed=80.0,
+            is_new_clash=True,
+            is_duel_active=True,
+        )
+        self.assertTrue(res.is_parry)
+        self.assertIsNone(res.disarmed_slot)
+        self.assertIn("PARRIED", res.banner_text or "")
+
+    def test_parry_evaluation_foible_miss(self) -> None:
+        """Verify a strike hitting the defender's weak tip (foible, ratio > 0.72) results in missed parry disarm."""
+        # Person 1 attacks fast (450 px/s), Person 2 struck at weak tip (ratio2 = 0.88)
+        col = CollisionInfo(clash_point=(600.0, 350.0), normal=(0.0, 1.0), ratio1=0.7, ratio2=0.88)
+        res = evaluate_duel_clash(
+            collision=col,
+            s1_dir=(1.0, 0.0),
+            s2_dir=(0.0, 1.0),
+            s1_speed=450.0,
+            s2_speed=80.0,
+            is_new_clash=True,
+            is_duel_active=True,
+        )
+        self.assertFalse(res.is_parry)
+        self.assertEqual(res.disarmed_slot, "Person2")
+        self.assertIn("WEAK TIP", res.banner_text or "")
+
+    def test_parry_evaluation_parallel_slip_miss(self) -> None:
+        """Verify a defender with poor crossing angle (< 30 deg) causes missed parry disarm."""
+        # Blades nearly parallel (angle < 20 deg)
+        col = CollisionInfo(clash_point=(600.0, 350.0), normal=(0.0, 1.0), ratio1=0.5, ratio2=0.45)
+        res = evaluate_duel_clash(
+            collision=col,
+            s1_dir=(0.98, 0.20),
+            s2_dir=(0.95, 0.31),  # Angle approx 7 degrees
+            s1_speed=440.0,
+            s2_speed=70.0,
+            is_new_clash=True,
+            is_duel_active=True,
+        )
+        self.assertFalse(res.is_parry)
+        self.assertEqual(res.disarmed_slot, "Person2")
+        self.assertIn("SLIPPED", res.banner_text or "")
+
+
+if __name__ == "__main__":
+    unittest.main()

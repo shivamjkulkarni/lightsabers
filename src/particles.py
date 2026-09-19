@@ -159,3 +159,4 @@ class ParticleSystem:
     def clear(self) -> None:
         """Clear all active sparks."""
         self.sparks.clear()
+

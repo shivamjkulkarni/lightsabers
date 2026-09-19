@@ -34,6 +34,7 @@ class HandObservation:
     middle_mcp: Tuple[float, float]
     knuckles_center: Tuple[float, float]
     palm_center: Tuple[float, float]
+    hand_size: float = 65.0  # 3D tilt-invariant physical hand span in pixels
 
 
 class HandTracker:
@@ -121,6 +122,22 @@ class HandTracker:
                 (wrist[1] + knuckles_center[1]) * 0.5,
             )
 
+            # Compute 3D tilt-invariant hand physical scale
+            lm_wrist = landmarks_proto[WRIST_IDX]
+            lm_idx = landmarks_proto[INDEX_MCP_IDX]
+            lm_mid = landmarks_proto[MIDDLE_MCP_IDX]
+            lm_rng = landmarks_proto[RING_MCP_IDX]
+            lm_pky = landmarks_proto[PINKY_MCP_IDX]
+            km_x = (lm_idx.x + lm_mid.x + lm_rng.x + lm_pky.x) * 0.25
+            km_y = (lm_idx.y + lm_mid.y + lm_rng.y + lm_pky.y) * 0.25
+            km_z = getattr(lm_idx, "z", 0.0) + getattr(lm_mid, "z", 0.0) + getattr(lm_rng, "z", 0.0) + getattr(lm_pky, "z", 0.0)
+            km_z *= 0.25
+
+            dx = (km_x - lm_wrist.x) * w
+            dy = (km_y - lm_wrist.y) * h
+            dz = (km_z - getattr(lm_wrist, "z", 0.0)) * w
+            hand_size = max(15.0, math.sqrt(dx * dx + dy * dy + dz * dz))
+
             observations.append(
                 HandObservation(
                     handedness=handedness_str,
@@ -131,6 +148,7 @@ class HandTracker:
                     middle_mcp=middle_mcp,
                     knuckles_center=knuckles_center,
                     palm_center=palm_center,
+                    hand_size=hand_size,
                 )
             )
 
@@ -195,7 +213,7 @@ def draw_hand_landmarks(frame: np.ndarray, observations: List[HandObservation]) 
 
 def filter_one_hand_per_person(
     observations: List[HandObservation],
-    same_person_max_distance_ratio: float = 3.5,
+    same_person_max_distance_ratio: float = 5.5,
 ) -> List[HandObservation]:
     """
     Ensure only one hand per person is tracked.
@@ -210,12 +228,8 @@ def filter_one_hand_per_person(
     h1, h2 = observations[0], observations[1]
     wrist_dist = math.hypot(h1.wrist[0] - h2.wrist[0], h1.wrist[1] - h2.wrist[1])
 
-    size1 = math.hypot(
-        h1.knuckles_center[0] - h1.wrist[0], h1.knuckles_center[1] - h1.wrist[1]
-    )
-    size2 = math.hypot(
-        h2.knuckles_center[0] - h2.wrist[0], h2.knuckles_center[1] - h2.wrist[1]
-    )
+    size1 = getattr(h1, "hand_size", math.hypot(h1.knuckles_center[0] - h1.wrist[0], h1.knuckles_center[1] - h1.wrist[1]))
+    size2 = getattr(h2, "hand_size", math.hypot(h2.knuckles_center[0] - h2.wrist[0], h2.knuckles_center[1] - h2.wrist[1]))
     avg_size = max(10.0, (size1 + size2) * 0.5)
 
     # Distance threshold representing arm-span of a single person in frame
@@ -232,4 +246,99 @@ def filter_one_hand_per_person(
         return [dominant]
 
     # Distant hands = two distinct people in frame
-    return observations
+    return observations[:2]
+
+
+class TwoPersonTracker:
+    """
+    Stateful tracker that maintains distinct player identities across frames.
+    
+    Prevents the 'clash proximity person-merging' bug: when two distinct players
+    cross blades, their hands can temporarily be close together. This tracker
+    uses spatial hysteresis and trajectory history to keep both players active
+    during clashes, while ensuring a single person in the room is strictly
+    limited to 1 lightsaber.
+    """
+
+    def __init__(
+        self,
+        same_person_max_distance_ratio: float = 5.5,
+        confirmation_distance_ratio: float = 4.2,
+        loss_timeout: float = 0.6,
+    ) -> None:
+        self.same_person_max_distance_ratio = same_person_max_distance_ratio
+        self.confirmation_distance_ratio = confirmation_distance_ratio
+        self.loss_timeout = loss_timeout
+
+        self.two_people_confirmed: bool = False
+        self.last_two_people_time: float = 0.0
+        self.p1_x: Optional[float] = None
+        self.p2_x: Optional[float] = None
+
+    def update(
+        self,
+        raw_observations: List[HandObservation],
+        curr_time: float,
+    ) -> List[HandObservation]:
+        """Filter and map observations to at most 2 distinct people."""
+        if not raw_observations:
+            if curr_time - self.last_two_people_time > self.loss_timeout:
+                self.two_people_confirmed = False
+                self.p1_x = None
+                self.p2_x = None
+            return []
+
+        if len(raw_observations) == 1:
+            if curr_time - self.last_two_people_time > self.loss_timeout:
+                self.two_people_confirmed = False
+            obs = raw_observations[0]
+            self.p1_x = obs.wrist[0]
+            return [obs]
+
+        # Two or more hands detected
+        h1, h2 = raw_observations[0], raw_observations[1]
+        wrist_dist = math.hypot(h1.wrist[0] - h2.wrist[0], h1.wrist[1] - h2.wrist[1])
+        avg_size = max(10.0, (getattr(h1, "hand_size", 65.0) + getattr(h2, "hand_size", 65.0)) * 0.5)
+
+        arm_span_threshold = self.same_person_max_distance_ratio * avg_size
+        confirm_threshold = self.confirmation_distance_ratio * avg_size
+
+        # If wrists are far apart, confirm 2 distinct people
+        if wrist_dist >= confirm_threshold:
+            self.two_people_confirmed = True
+            self.last_two_people_time = curr_time
+
+        # If 2 people were previously confirmed and hasn't timed out, maintain both during clash
+        if self.two_people_confirmed:
+            if curr_time - self.last_two_people_time <= self.loss_timeout:
+                self.last_two_people_time = curr_time
+                obs_sorted = sorted([h1, h2], key=lambda o: o.wrist[0])
+                self.p1_x = obs_sorted[0].wrist[0]
+                self.p2_x = obs_sorted[1].wrist[0]
+                return obs_sorted
+            else:
+                self.two_people_confirmed = False
+
+        # In 1-person mode: if wrists are within single-person arm span, pick dominant hand
+        if wrist_dist < arm_span_threshold:
+            y_diff = h1.wrist[1] - h2.wrist[1]
+            if abs(y_diff) > 25.0:
+                dominant = h1 if y_diff < 0 else h2
+            else:
+                dominant = h1 if h1.handedness == "Right" else h2
+            self.p1_x = dominant.wrist[0]
+            return [dominant]
+
+        # Hands beyond arm span -> 2 people
+        self.two_people_confirmed = True
+        self.last_two_people_time = curr_time
+        obs_sorted = sorted([h1, h2], key=lambda o: o.wrist[0])
+        self.p1_x = obs_sorted[0].wrist[0]
+        self.p2_x = obs_sorted[1].wrist[0]
+        return obs_sorted
+
+    def reset(self) -> None:
+        self.two_people_confirmed = False
+        self.last_two_people_time = 0.0
+        self.p1_x = None
+        self.p2_x = None
