@@ -15,7 +15,6 @@ import cv2
 import numpy as np
 from src.camera import Camera
 from src.collision import (
-    BladeRecoilController,
     check_blade_collision,
     evaluate_duel_clash,
 )
@@ -115,13 +114,13 @@ def main() -> None:
         ),
     }
 
-    # Physical simulations: sparks, elastic recoil, falling sabers
+    # Physical simulations: sparks, falling sabers
     particle_system = ParticleSystem(gravity=850.0, drag=0.93)
-    recoil_controller = BladeRecoilController(omega=38.0, zeta=0.75)
     falling_sabers: List[FallingSaber] = []
 
-    # Duel state machine: "AWAITING_IGNITION" -> "DUEL_ACTIVE" -> "ROUND_OVER"
+    # Duel state machine: "AWAITING_IGNITION" -> "COUNTDOWN" -> "DUEL_ACTIVE" -> "ROUND_OVER"
     duel_state = "AWAITING_IGNITION"
+    countdown_time_left = config.duel.countdown_seconds
     active_banner_text: Optional[str] = None
     active_banner_color: Tuple[int, int, int] = (0, 255, 128)
     active_banner_expiry: float = 0.0
@@ -298,26 +297,26 @@ def main() -> None:
                         trail_duration=config.saber.trail_duration,
                     )
 
-                # Update elastic blade recoil physics
-                recoil_controller.update(dt)
-
-                # Apply recoil deflection to active sabers
-                for slot_name, saber in sabers.items():
-                    if saber.is_active:
-                        angle = recoil_controller.get_recoil_angle(slot_name)
-                        saber.apply_recoil(angle)
-
                 # -------------------------------------------------------------
-                # DUEL STATE MACHINE UPDATES (IMMEDIATE COMBAT, NO COUNTDOWN)
+                # DUEL STATE MACHINE UPDATES (COUNTDOWN -> DUEL_ACTIVE)
                 # -------------------------------------------------------------
                 active_saber_count = sum(1 for s in sabers.values() if s.is_active and s.is_ignited)
 
                 if duel_state == "AWAITING_IGNITION":
                     if active_saber_count == 2:
-                        duel_state = "DUEL_ACTIVE"
-                        active_banner_text = "ENGAGE! COMBAT ACTIVE"
-                        active_banner_color = (0, 255, 255)
-                        active_banner_expiry = curr_time + 1.2
+                        duel_state = "COUNTDOWN"
+                        countdown_time_left = config.duel.countdown_seconds
+                elif duel_state == "COUNTDOWN":
+                    if active_saber_count < 2:
+                        # Combatant lowered hand or extinguished blade
+                        duel_state = "AWAITING_IGNITION"
+                    else:
+                        countdown_time_left -= dt
+                        if countdown_time_left <= 0.0:
+                            duel_state = "DUEL_ACTIVE"
+                            active_banner_text = "ENGAGE! DUEL ACTIVE"
+                            active_banner_color = (0, 255, 255)
+                            active_banner_expiry = curr_time + 1.2
                 elif duel_state == "DUEL_ACTIVE":
                     if active_saber_count < 2 and not s_blue.is_disarmed and not s_red.is_disarmed:
                         duel_state = "AWAITING_IGNITION"
@@ -328,7 +327,8 @@ def main() -> None:
                         and not s_red.is_disarmed
                     ):
                         if active_saber_count == 2:
-                            duel_state = "DUEL_ACTIVE"
+                            duel_state = "COUNTDOWN"
+                            countdown_time_left = 2.0  # Quick 2-second countdown for next round
                         else:
                             duel_state = "AWAITING_IGNITION"
 
@@ -364,18 +364,7 @@ def main() -> None:
                             count=28,
                         )
 
-                        # 2. Apply spring-damper recoil impulses
-                        if s_blue.current_direction and s_red.current_direction:
-                            recoil_controller.apply_clash_impulse(
-                                "Person1",
-                                "Person2",
-                                collision.normal,
-                                s_blue.current_direction,
-                                s_red.current_direction,
-                                impulse_magnitude=0.45,
-                            )
-
-                        # 3. Evaluate duel combat mechanics (parry vs missed parry)
+                        # 2. Evaluate duel combat mechanics (parry vs missed parry)
                         if s_blue.current_direction and s_red.current_direction:
                             clash_eval = evaluate_duel_clash(
                                 collision=collision,
@@ -499,25 +488,30 @@ def main() -> None:
                 # Render Newtonian sparks with thermal color decay
                 particle_system.draw(light_canvas)
 
-                # Render holographic on-screen Ignition Chamber
-                render_ignition_box(
-                    frame,
-                    light_canvas,
-                    ignition_box_rect,
-                    has_hand_inside=has_hand_in_box,
-                    detected_gesture=detected_box_gesture,
-                    is_blue_ignited=s_blue.is_ignited,
-                    is_red_ignited=s_red.is_ignited,
-                    curr_time=curr_time,
-                )
+                # Render holographic on-screen Ignition Chamber (completely removed after both ignite)
+                if not (s_blue.is_ignited and s_red.is_ignited):
+                    render_ignition_box(
+                        frame,
+                        light_canvas,
+                        ignition_box_rect,
+                        has_hand_inside=has_hand_in_box,
+                        detected_gesture=detected_box_gesture,
+                        is_blue_ignited=s_blue.is_ignited,
+                        is_red_ignited=s_red.is_ignited,
+                        curr_time=curr_time,
+                    )
 
                 # 3. Additive bloom and compositing with saturating addition
                 composite_light_layer(frame, light_canvas, show_glow=show_glow)
 
-                # 4. Duel HUD Display
+                # 4. Duel HUD & Countdown Display
                 if duel_state == "AWAITING_IGNITION":
-                    status_str = f"AWAITING IGNITION IN CHAMBER ({active_saber_count}/2 ACTIVE)"
+                    status_str = f"AWAITING JEDI & SITH IGNITION ({active_saber_count}/2 ACTIVE)"
                     draw_centered_text(frame, status_str, y=50, font_scale=0.75, color=(160, 200, 255))
+                elif duel_state == "COUNTDOWN":
+                    sec_num = int(math.ceil(countdown_time_left))
+                    cd_text = f"DUEL IN: {sec_num}" if sec_num > 0 else "ENGAGE!"
+                    draw_centered_text(frame, cd_text, y=100, font_scale=1.4, color=(0, 230, 255), thickness=4)
                 elif duel_state == "DUEL_ACTIVE":
                     draw_centered_text(
                         frame,
@@ -618,10 +612,10 @@ def main() -> None:
                     for saber in sabers.values():
                         saber.reset()
                     person_tracker.reset()
-                    recoil_controller.reset()
                     particle_system.clear()
                     falling_sabers.clear()
                     duel_state = "AWAITING_IGNITION"
+                    countdown_time_left = config.duel.countdown_seconds
                     active_banner_text = None
 
     except FileNotFoundError as e:

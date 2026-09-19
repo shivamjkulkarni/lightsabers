@@ -70,6 +70,7 @@ class IgnitionBoxConfig:
 
 @dataclass
 class DuelConfig:
+    countdown_seconds: float = 3.0
     post_disarm_cooldown: float = 2.5
     strike_min_speed: float = 340.0
     strike_speed_ratio: float = 1.7

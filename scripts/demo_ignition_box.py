@@ -1,4 +1,4 @@
-"""Visual verification script demonstrating the Ignition Box and Instant Gestures."""
+"""Visual verification script demonstrating the Ignition Box removal, Countdown, and Stable Winning Saber."""
 
 import math
 import os
@@ -13,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
 import cv2
 import numpy as np
 from src.config import AppConfig
+from src.falling_saber import FallingSaber
 from src.gestures import is_force_push_pose, is_hand_in_box, is_two_finger_pose
 from src.hand_tracker import HandObservation
 from src.particles import ParticleSystem
@@ -36,7 +37,6 @@ def create_mock_hand(
     landmarks = [(wx, wy)] * 21
     landmarks_3d = [(wx, wy, 0.0)] * 21
 
-    # Finger indices: (mcp, pip, dip, tip)
     finger_defs = {
         "index": (5, 6, 7, 8, -25.0),
         "middle": (9, 10, 11, 12, -8.0),
@@ -93,6 +93,8 @@ def render_panel(
     ignited_red: bool = False,
     extra_hand: tuple = None,
     extra_pose: str = None,
+    countdown_val: int = None,
+    disarmed_saber: FallingSaber = None,
 ) -> np.ndarray:
     """Render a single scenario panel."""
     w, h = 640, 480
@@ -108,7 +110,6 @@ def render_panel(
     light_canvas = canvas_buffer.reset_and_get((h, w))
     particle_system = ParticleSystem(gravity=850.0, drag=0.93)
 
-    # Ignition Box: centered in frame
     box_rect = (int(w * 0.30), int(h * 0.15), int(w * 0.70), int(h * 0.65))
 
     obs = create_mock_hand(hand_pos, pose_type=pose_type)
@@ -141,17 +142,13 @@ def render_panel(
         alpha_direction=0.60,
         is_ignited=ignited_red,
     )
-    if extra_hand and extra_pose:
+    if extra_hand and extra_pose and not disarmed_saber:
         obs_red = create_mock_hand(extra_hand, pose_type=extra_pose)
         if ignited_red:
             s_red.update(obs_red, curr_time=1.0, blade_length=360.0)
-    elif ignited_red:
-        s_red.update(obs, curr_time=1.0, blade_length=360.0)
 
     # Spawn ignition sparks if triggering
-    if detected_gesture == "JediBlue" and ignited_blue:
-        particle_system.spawn_clash_sparks(obs.knuckles_center[0], obs.knuckles_center[1], count=25)
-    elif detected_gesture == "SithRed" and ignited_red:
+    if detected_gesture == "JediBlue" and ignited_blue and not extra_hand:
         particle_system.spawn_clash_sparks(obs.knuckles_center[0], obs.knuckles_center[1], count=25)
 
     # Render Hilts
@@ -164,8 +161,17 @@ def render_panel(
         if s.is_active and s.current_emitter and s.current_endpoint:
             draw_blade_on_light_canvas(light_canvas, s.current_emitter, s.current_endpoint, s.color, curr_time=1.0, scale_factor=0.9)
 
+    # Draw falling saber if present
+    if disarmed_saber:
+        disarmed_saber.draw(frame, light_canvas, curr_time=1.0)
+        # Add floor contact sparks
+        particle_system.spawn_clash_sparks(disarmed_saber.floor_width * 0.7, disarmed_saber.floor_y, count=15)
+
     # Draw Hand landmarks
-    for o in [obs] + ([create_mock_hand(extra_hand, extra_pose)] if extra_hand else []):
+    hands_to_draw = [obs]
+    if extra_hand and not disarmed_saber:
+        hands_to_draw.append(create_mock_hand(extra_hand, extra_pose))
+    for o in hands_to_draw:
         for pt in o.landmarks:
             cv2.circle(frame, (int(pt[0]), int(pt[1])), 3, (0, 255, 120), -1)
         cv2.circle(frame, (int(o.wrist[0]), int(o.wrist[1])), 6, (0, 200, 255), -1)
@@ -173,20 +179,30 @@ def render_panel(
     # Render Sparks
     particle_system.draw(light_canvas)
 
-    # Render Ignition Box
-    render_ignition_box(
-        frame,
-        light_canvas,
-        box_rect,
-        has_hand_inside=in_box,
-        detected_gesture=detected_gesture,
-        is_blue_ignited=s_blue.is_ignited,
-        is_red_ignited=s_red.is_ignited,
-        curr_time=1.0,
-    )
+    # Render Ignition Box ONLY if not both ignited
+    both_ignited = ignited_blue and (ignited_red or disarmed_saber is not None)
+    if not both_ignited:
+        render_ignition_box(
+            frame,
+            light_canvas,
+            box_rect,
+            has_hand_inside=in_box,
+            detected_gesture=detected_gesture,
+            is_blue_ignited=s_blue.is_ignited,
+            is_red_ignited=s_red.is_ignited,
+            curr_time=1.0,
+        )
 
     # Composite Glow
     composite_light_layer(frame, light_canvas, show_glow=True)
+
+    # Countdown overlay if active
+    if countdown_val is not None:
+        cd_text = f"DUEL IN: {countdown_val}"
+        (tw, _), _ = cv2.getTextSize(cd_text, cv2.FONT_HERSHEY_SIMPLEX, 1.3, 3)
+        cx = (w - tw) // 2
+        cv2.putText(frame, cd_text, (cx, 90), cv2.FONT_HERSHEY_SIMPLEX, 1.3, (0, 0, 0), 6, cv2.LINE_AA)
+        cv2.putText(frame, cd_text, (cx, 90), cv2.FONT_HERSHEY_SIMPLEX, 1.3, (0, 230, 255), 3, cv2.LINE_AA)
 
     # Panel Banner Header
     cv2.rectangle(frame, (0, 0), (w, 36), (15, 15, 20), -1)
@@ -196,7 +212,7 @@ def render_panel(
 
 
 def main() -> None:
-    print("Generating visual verification for Ignition Box & Instant Gestures...")
+    print("Generating visual verification for Ignition Box Removal, Countdown, and Stable Winning Saber...")
 
     # Panel 1: Hand Outside Box (Ignition Blocked)
     p1 = render_panel(
@@ -216,26 +232,42 @@ def main() -> None:
     )
     cv2.putText(p2, "INSTANT BLUE IGNITION (<0.03s)", (50, 440), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 180, 0), 2, cv2.LINE_AA)
 
-    # Panel 3: Hand Inside Box + Force Push -> Instant Red
+    # Panel 3: Both Ignited -> Box Removed, Countdown Starts
     p3 = render_panel(
-        panel_title="3. Inside Box + Force Push -> Sith Red",
-        hand_pos=(320, 250),
-        pose_type="force_push",
-        ignited_red=True,
-    )
-    cv2.putText(p3, "INSTANT RED IGNITION (<0.03s)", (50, 440), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (30, 40, 255), 2, cv2.LINE_AA)
-
-    # Panel 4: Both Ignited -> Instant Active Combat (No Countdown)
-    p4 = render_panel(
-        panel_title="4. Both Ignited -> Combat Active (No Countdown)",
+        panel_title="3. Both Ignited -> Chamber Removed, Countdown",
         hand_pos=(180, 320),
         pose_type="peace",
         ignited_blue=True,
         ignited_red=True,
         extra_hand=(460, 320),
         extra_pose="force_push",
+        countdown_val=3,
     )
-    cv2.putText(p4, "DUEL ACTIVE - NO COUNTDOWN GATE", (50, 440), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 180), 2, cv2.LINE_AA)
+    cv2.putText(p3, "BOX REMOVED | 3-SEC COUNTDOWN ACTIVE", (50, 440), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 240, 255), 2, cv2.LINE_AA)
+
+    # Panel 4: Disarm Occurs -> Red Saber Falls, Blue Saber Rock-Solid
+    fs = FallingSaber(
+        hilt_pos=(440.0, 390.0),
+        initial_velocity=(140.0, -180.0),
+        initial_angle=-0.8,
+        angular_velocity=6.0,
+        color=(30, 30, 255),
+        blade_length=320.0,
+        floor_y=450.0,
+        floor_width=640.0,
+    )
+    fs.bounce_count = 1
+    fs.blade_retract_progress = 0.5
+
+    p4 = render_panel(
+        panel_title="4. Disarm: Red Falls, Blue Stays Rock-Solid (No Recoil)",
+        hand_pos=(180, 320),
+        pose_type="peace",
+        ignited_blue=True,
+        ignited_red=False,
+        disarmed_saber=fs,
+    )
+    cv2.putText(p4, "WINNER BLUE STABLE & ROCK-SOLID (NO RECOIL FREAKOUT)", (30, 440), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 120), 2, cv2.LINE_AA)
 
     # Assemble 2x2 grid
     top_row = np.hstack([p1, p2])

@@ -262,7 +262,9 @@ def render_ignition_box(
     box_w = bx2 - bx1
     box_h = by2 - by1
 
-    both_ignited = is_blue_ignited and is_red_ignited
+    # Completely remove/hide ignition chamber after both sabers are ignited
+    if is_blue_ignited and is_red_ignited:
+        return
 
     # Determine state color
     if detected_gesture == "JediBlue":
@@ -281,7 +283,7 @@ def render_ignition_box(
         glow_color = (0, 140, 200)
 
     # Base border
-    dim_mult = 0.2 if both_ignited else 0.4
+    dim_mult = 0.4
     dim_color = (
         int(border_color[0] * dim_mult),
         int(border_color[1] * dim_mult),
@@ -307,35 +309,33 @@ def render_ignition_box(
     cv2.line(frame, (bx2, by2), (bx2, by2 - corner_len), border_color, thickness, cv2.LINE_AA)
 
     # Soft glowing bloom on light_canvas for the brackets
-    if not both_ignited:
-        cv2.line(light_canvas, (bx1, by1), (bx1 + corner_len, by1), glow_color, thickness + 3, cv2.LINE_AA)
-        cv2.line(light_canvas, (bx1, by1), (bx1, by1 + corner_len), glow_color, thickness + 3, cv2.LINE_AA)
-        cv2.line(light_canvas, (bx2, by1), (bx2 - corner_len, by1), glow_color, thickness + 3, cv2.LINE_AA)
-        cv2.line(light_canvas, (bx2, by1), (bx2, by1 + corner_len), glow_color, thickness + 3, cv2.LINE_AA)
-        cv2.line(light_canvas, (bx1, by2), (bx1 + corner_len, by2), glow_color, thickness + 3, cv2.LINE_AA)
-        cv2.line(light_canvas, (bx1, by2), (bx1, by2 - corner_len), glow_color, thickness + 3, cv2.LINE_AA)
-        cv2.line(light_canvas, (bx2, by2), (bx2 - corner_len, by2), glow_color, thickness + 3, cv2.LINE_AA)
-        cv2.line(light_canvas, (bx2, by2), (bx2, by2 - corner_len), glow_color, thickness + 3, cv2.LINE_AA)
+    cv2.line(light_canvas, (bx1, by1), (bx1 + corner_len, by1), glow_color, thickness + 3, cv2.LINE_AA)
+    cv2.line(light_canvas, (bx1, by1), (bx1, by1 + corner_len), glow_color, thickness + 3, cv2.LINE_AA)
+    cv2.line(light_canvas, (bx2, by1), (bx2 - corner_len, by1), glow_color, thickness + 3, cv2.LINE_AA)
+    cv2.line(light_canvas, (bx2, by1), (bx2, by1 + corner_len), glow_color, thickness + 3, cv2.LINE_AA)
+    cv2.line(light_canvas, (bx1, by2), (bx1 + corner_len, by2), glow_color, thickness + 3, cv2.LINE_AA)
+    cv2.line(light_canvas, (bx1, by2), (bx1, by2 - corner_len), glow_color, thickness + 3, cv2.LINE_AA)
+    cv2.line(light_canvas, (bx2, by2), (bx2 - corner_len, by2), glow_color, thickness + 3, cv2.LINE_AA)
+    cv2.line(light_canvas, (bx2, by2), (bx2, by2 - corner_len), glow_color, thickness + 3, cv2.LINE_AA)
 
     # Top Header Label Badge
-    if not both_ignited:
-        title = "[ IGNITION CHAMBER ]"
-        (tw, _), _ = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
-        tx = bx1 + (box_w - tw) // 2
-        ty = max(25, by1 - 12)
-        cv2.putText(frame, title, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 4, cv2.LINE_AA)
-        cv2.putText(frame, title, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.55, border_color, 2, cv2.LINE_AA)
+    title = "[ IGNITION CHAMBER ]"
+    (tw, _), _ = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+    tx = bx1 + (box_w - tw) // 2
+    ty = max(25, by1 - 12)
+    cv2.putText(frame, title, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 4, cv2.LINE_AA)
+    cv2.putText(frame, title, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.55, border_color, 2, cv2.LINE_AA)
 
-        # Contextual prompt below box
-        if has_hand_inside:
-            sub = "FORM POSE: 2 FINGERS (BLUE) | FORCE PUSH (RED)"
-            sub_color = (0, 255, 255)
-        else:
-            sub = "PLACE HAND IN BOX TO IGNITE"
-            sub_color = (180, 220, 255)
+    # Contextual prompt below box
+    if has_hand_inside:
+        sub = "FORM POSE: 2 FINGERS (BLUE) | FORCE PUSH (RED)"
+        sub_color = (0, 255, 255)
+    else:
+        sub = "PLACE HAND IN BOX TO IGNITE"
+        sub_color = (180, 220, 255)
 
-        (sw, _), _ = cv2.getTextSize(sub, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
-        sx = bx1 + (box_w - sw) // 2
-        sy = by2 + 25
-        cv2.putText(frame, sub, (sx, sy), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 3, cv2.LINE_AA)
-        cv2.putText(frame, sub, (sx, sy), cv2.FONT_HERSHEY_SIMPLEX, 0.45, sub_color, 1, cv2.LINE_AA)
+    (sw, _), _ = cv2.getTextSize(sub, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+    sx = bx1 + (box_w - sw) // 2
+    sy = by2 + 25
+    cv2.putText(frame, sub, (sx, sy), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 3, cv2.LINE_AA)
+    cv2.putText(frame, sub, (sx, sy), cv2.FONT_HERSHEY_SIMPLEX, 0.45, sub_color, 1, cv2.LINE_AA)
