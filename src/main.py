@@ -1,6 +1,5 @@
 """Main entry point for Lightsabers application."""
 
-import collections
 import pathlib
 import sys
 import time
@@ -12,14 +11,13 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import cv2
 from src.camera import Camera
-from src.geometry import calculate_saber_direction, calculate_saber_endpoint
 from src.hand_tracker import HandTracker, draw_hand_landmarks
 from src.renderer import render_blade, render_hilt, render_trail
-from src.smoothing import DirectionSmoother, PointSmoother
+from src.saber import SaberInstance
 
 
 def main() -> None:
-    print("Starting Lightsabers — Visual Prototype...")
+    print("Starting Lightsabers — Dual Saber Mode...")
     print("Controls: 'q'/ESC: quit | 'g': toggle glow | 't': toggle trail | 'd': toggle debug | 'r': reset")
 
     window_name = "Jedi Lightsabers"
@@ -32,16 +30,16 @@ def main() -> None:
     show_trail = True
     show_debug = False
 
-    pivot_smoother = PointSmoother(alpha=0.65)
-    direction_smoother = DirectionSmoother(alpha=0.60)
-    trail_history: collections.deque = collections.deque()
-
-    # Saber blade color in BGR (electric blue/cyan)
-    blade_color = (255, 120, 30)
+    # Independent sabers for left and right hands
+    # Left hand: Jedi Guardian Blue/Cyan | Right hand: Jedi Consular Emerald Green
+    sabers = {
+        "Left": SaberInstance(handedness="Left", color=(255, 120, 30)),
+        "Right": SaberInstance(handedness="Right", color=(30, 255, 120)),
+    }
 
     try:
         with Camera(camera_index=0, width=1280, height=720, flip_horizontal=True) as camera, \
-             HandTracker() as tracker:
+             HandTracker(num_hands=2) as tracker:
             while True:
                 frame = camera.read()
                 if frame is None:
@@ -53,43 +51,57 @@ def main() -> None:
                 fps = 0.9 * fps + 0.1 * (1.0 / max(curr_time - prev_time, 1e-5))
                 prev_time = curr_time
 
-                # Detect hands
+                # Detect up to 2 hands
                 observations = tracker.detect(frame)
 
-                # Smooth and calculate saber for the primary detected hand
-                current_direction = None
-                if observations:
-                    obs = observations[0]
-                    smooth_pivot = pivot_smoother.update(obs.wrist)
-                    raw_direction = calculate_saber_direction(obs.wrist, obs.index_mcp, obs.index_tip)
-                    current_direction = direction_smoother.update(raw_direction)
-                    endpoint = calculate_saber_endpoint(smooth_pivot, current_direction, blade_length)
+                # Match detected hands to sabers by handedness
+                matched_obs = {}
+                unassigned = []
+                for obs in observations:
+                    if obs.handedness in sabers and obs.handedness not in matched_obs:
+                        matched_obs[obs.handedness] = obs
+                    else:
+                        unassigned.append(obs)
 
-                    # Store in trail history: (pivot, endpoint, timestamp)
-                    trail_history.append((smooth_pivot, endpoint, curr_time))
-                else:
-                    pivot_smoother.reset()
-                    direction_smoother.reset()
+                # Assign any unassigned hand observation to free saber slot
+                for hand_key in ("Left", "Right"):
+                    if hand_key not in matched_obs and unassigned:
+                        matched_obs[hand_key] = unassigned.pop(0)
 
-                # Expire old trail points
-                while trail_history and (curr_time - trail_history[0][2] > trail_duration):
-                    trail_history.popleft()
+                # Update each saber instance
+                for hand_key, saber in sabers.items():
+                    saber.update(
+                        matched_obs.get(hand_key),
+                        curr_time=curr_time,
+                        blade_length=blade_length,
+                        trail_duration=trail_duration,
+                    )
 
-                # 1. Render motion trail
-                if show_trail and len(trail_history) >= 2:
-                    render_trail(frame, trail_history, blade_color, trail_duration, curr_time)
+                # 1. Render motion trails for all sabers
+                if show_trail:
+                    for saber in sabers.values():
+                        if len(saber.trail_history) >= 2:
+                            render_trail(
+                                frame,
+                                saber.trail_history,
+                                saber.color,
+                                trail_duration,
+                                curr_time,
+                            )
 
-                # 2. Render hilt & luminous blade
-                if observations and trail_history and current_direction is not None:
-                    curr_pivot, curr_endpoint, _ = trail_history[-1]
-                    render_hilt(frame, curr_pivot, current_direction, hilt_length=50.0)
-                    render_blade(frame, curr_pivot, curr_endpoint, blade_color, show_glow=show_glow)
+                # 2. Render hilts and luminous blades for active sabers
+                for saber in sabers.values():
+                    if saber.is_active and saber.current_pivot and saber.current_endpoint and saber.current_direction:
+                        render_hilt(frame, saber.current_pivot, saber.current_direction, hilt_length=50.0)
+                        render_blade(frame, saber.current_pivot, saber.current_endpoint, saber.color, show_glow=show_glow)
 
                 # 3. Optional Debug Overlay
                 if show_debug:
                     draw_hand_landmarks(frame, observations)
+                    active_sabers = [k for k, s in sabers.items() if s.is_active]
                     status_text = (
                         f"FPS: {fps:.1f} | Hands: {len(observations)} | "
+                        f"Sabers: {', '.join(active_sabers) or 'None'} | "
                         f"Glow: {'ON' if show_glow else 'OFF'} | "
                         f"Trail: {'ON' if show_trail else 'OFF'}"
                     )
@@ -120,9 +132,8 @@ def main() -> None:
                 elif key in (ord("d"), ord("D")):  # 'd' to toggle debug
                     show_debug = not show_debug
                 elif key in (ord("r"), ord("R")):  # 'r' to reset
-                    pivot_smoother.reset()
-                    direction_smoother.reset()
-                    trail_history.clear()
+                    for saber in sabers.values():
+                        saber.reset()
 
     except FileNotFoundError as e:
         print(f"\nConfiguration Error: {e}", file=sys.stderr)
