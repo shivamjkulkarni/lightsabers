@@ -1,5 +1,6 @@
 """Main entry point for Lightsabers application."""
 
+import collections
 import pathlib
 import sys
 import time
@@ -10,6 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import cv2
+import numpy as np
 from src.camera import Camera
 from src.geometry import calculate_saber_direction, calculate_saber_endpoint
 from src.hand_tracker import HandTracker, draw_hand_landmarks
@@ -17,16 +19,22 @@ from src.smoothing import DirectionSmoother, PointSmoother
 
 
 def main() -> None:
-    print("Starting Lightsabers — Smoothed Saber Motion Mode...")
-    print("Controls: 'q'/ESC to exit, 'r' to reset smoother.")
+    print("Starting Lightsabers — Saber Motion Trail Mode...")
+    print("Controls: 'q'/ESC to exit, 't' to toggle trail, 'r' to reset.")
 
     window_name = "Jedi Lightsabers"
     prev_time = time.time()
     fps = 0.0
     blade_length = 320.0
+    trail_duration = 0.35  # seconds
+    show_trail = True
 
     pivot_smoother = PointSmoother(alpha=0.65)
     direction_smoother = DirectionSmoother(alpha=0.60)
+    trail_history: collections.deque = collections.deque()
+
+    # Saber blade color in BGR (electric blue/cyan)
+    blade_color = (255, 120, 30)
 
     try:
         with Camera(camera_index=0, width=1280, height=720, flip_horizontal=True) as camera, \
@@ -48,7 +56,7 @@ def main() -> None:
                 # Draw tracked hand landmarks
                 draw_hand_landmarks(frame, observations)
 
-                # Smooth and draw saber for the primary detected hand
+                # Smooth and calculate saber for the primary detected hand
                 if observations:
                     obs = observations[0]
                     smooth_pivot = pivot_smoother.update(obs.wrist)
@@ -56,19 +64,58 @@ def main() -> None:
                     smooth_direction = direction_smoother.update(raw_direction)
                     endpoint = calculate_saber_endpoint(smooth_pivot, smooth_direction, blade_length)
 
-                    wrist_pt = (int(smooth_pivot[0]), int(smooth_pivot[1]))
-                    end_pt = (int(endpoint[0]), int(endpoint[1]))
-
-                    # Draw smoothed saber line
-                    cv2.line(frame, wrist_pt, end_pt, (255, 120, 30), 6, cv2.LINE_AA)
-                    cv2.circle(frame, wrist_pt, 6, (0, 255, 255), -1, cv2.LINE_AA)
-                    cv2.circle(frame, end_pt, 4, (255, 255, 255), -1, cv2.LINE_AA)
+                    # Store in trail history: (pivot, endpoint, timestamp)
+                    trail_history.append((smooth_pivot, endpoint, curr_time))
                 else:
                     pivot_smoother.reset()
                     direction_smoother.reset()
 
+                # Expire old trail points
+                while trail_history and (curr_time - trail_history[0][2] > trail_duration):
+                    trail_history.popleft()
+
+                # Render motion trail (quad ribbons between consecutive historical frames)
+                if show_trail and len(trail_history) >= 2:
+                    trail_overlay = np.zeros_like(frame)
+                    history_list = list(trail_history)
+
+                    for i in range(len(history_list) - 1):
+                        p1_start, p1_end, t1 = history_list[i]
+                        p2_start, p2_end, _ = history_list[i + 1]
+
+                        age = curr_time - t1
+                        alpha = max(0.0, min(1.0, 1.0 - (age / trail_duration)))
+
+                        poly = np.array([
+                            [int(p1_start[0]), int(p1_start[1])],
+                            [int(p1_end[0]), int(p1_end[1])],
+                            [int(p2_end[0]), int(p2_end[1])],
+                            [int(p2_start[0]), int(p2_start[1])],
+                        ], dtype=np.int32)
+
+                        # Dimmer trail color with age
+                        seg_color = (
+                            int(blade_color[0] * alpha * 0.5),
+                            int(blade_color[1] * alpha * 0.5),
+                            int(blade_color[2] * alpha * 0.5),
+                        )
+                        cv2.fillPoly(trail_overlay, [poly], seg_color)
+
+                    frame = cv2.add(frame, trail_overlay)
+
+                # Render current saber blade line
+                if observations and trail_history:
+                    curr_pivot, curr_endpoint, _ = trail_history[-1]
+                    wrist_pt = (int(curr_pivot[0]), int(curr_pivot[1]))
+                    end_pt = (int(curr_endpoint[0]), int(curr_endpoint[1]))
+
+                    cv2.line(frame, wrist_pt, end_pt, blade_color, 6, cv2.LINE_AA)
+                    cv2.circle(frame, wrist_pt, 6, (0, 255, 255), -1, cv2.LINE_AA)
+                    cv2.circle(frame, end_pt, 4, (255, 255, 255), -1, cv2.LINE_AA)
+
                 # Overlay status
-                status_text = f"FPS: {fps:.1f} | Hands: {len(observations)} | Smoothed"
+                trail_status = "ON" if show_trail else "OFF"
+                status_text = f"FPS: {fps:.1f} | Hands: {len(observations)} | Trail: {trail_status}"
                 cv2.putText(
                     frame,
                     status_text,
@@ -89,9 +136,12 @@ def main() -> None:
                 key = cv2.waitKey(1) & 0xFF
                 if key in (ord("q"), ord("Q"), 27):  # 'q' or ESC
                     break
+                elif key in (ord("t"), ord("T")):  # 't' to toggle trail
+                    show_trail = not show_trail
                 elif key in (ord("r"), ord("R")):  # 'r' to reset
                     pivot_smoother.reset()
                     direction_smoother.reset()
+                    trail_history.clear()
 
     except FileNotFoundError as e:
         print(f"\nConfiguration Error: {e}", file=sys.stderr)
